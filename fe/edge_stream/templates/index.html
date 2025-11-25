@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Edge Stream</title>
+  <style>
+    body { font-family: Arial; margin:0; background:#111; color:#eee; }
+    #videoWrapper { position:relative; display:inline-block; }
+    #overlay { position:absolute; left:0; top:0; }
+    .stat { margin-top:8px; }
+  </style>
+</head>
+<body>
+  <h2>Realtime Stream</h2>
+  <div id="videoWrapper">
+    <img id="stream" src="/video" />
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="stat" id="status"></div>
+  <script src="/static/js/client.js"></script>
+</body>
+</html>
