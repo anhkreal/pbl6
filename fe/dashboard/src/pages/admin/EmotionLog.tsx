@@ -120,7 +120,17 @@ export default function EmotionLogPage() {
                 <td style={td}>{log.userName}</td>
                 <td style={td}>{log.timestamp.replace('T',' ').replace('Z','')}</td>
                 <td style={td}><span style={badge(log.emotion)}>{log.emotion}</span></td>
-                <td style={td}>{log.frameImage ? <img src={log.frameImage} alt="" style={{width:48,height:48,borderRadius:4,objectFit:'cover'}}/> : '--'}</td>
+                <td style={td}>{log.frameImage ? (
+                  <img
+                    src={
+                      log.frameImage.startsWith('data:image')
+                        ? log.frameImage
+                        : `data:image/jpeg;base64,${log.frameImage}`
+                    }
+                    alt=""
+                    style={{ width: 48, height: 48, borderRadius: 4, objectFit: 'cover' }}
+                  />
+                ) : '--'}</td>
                 <td style={td}>{log.note || '--'}</td>
                 <td style={td}>
                   <div style={{ position: 'relative', display: 'inline-block' }}>

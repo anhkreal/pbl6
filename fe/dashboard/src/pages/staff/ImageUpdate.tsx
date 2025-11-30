@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import * as faceapi from 'face-api.js';
 import StaffLayout from '../../layouts/StaffLayout';
 import { apiFetch } from '../../api/http';
 import { buildUrl } from '../../api/base';
@@ -24,20 +25,33 @@ export default function ImageUpdate() {
   const [images, setImages] = useState<Record<string, string>>({});
   const [countdown, setCountdown] = useState<number | null>(null);
   const [mockUploading, setMockUploading] = useState(false);
+  const [modelLoaded, setModelLoaded] = useState(false);
 
   useEffect(() => {
+    // Load face-api.js models song song, khi xong thì setModelLoaded(true)
+    Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/model'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/model')
+    ]).then(() => setModelLoaded(true));
     let mounted = true;
+    let localStream: MediaStream | null = null;
     (async () => {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
         if (!mounted) { s.getTracks().forEach(t => t.stop()); return; }
         setStream(s);
+        localStream = s;
         if (videoRef.current) videoRef.current.srcObject = s;
       } catch (e) {
         console.error('camera init', e);
       }
     })();
-    return () => { mounted = false; stream?.getTracks().forEach(t => t.stop()); };
+    return () => {
+      mounted = false;
+      // Dừng stream khi rời trang hoặc unmount
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -51,7 +65,11 @@ export default function ImageUpdate() {
     return () => clearTimeout(t);
   }, [countdown]);
 
-  function doCapture() {
+  async function doCapture() {
+    if (!modelLoaded) {
+      alert('Model nhận diện khuôn mặt chưa sẵn sàng. Vui lòng đợi!');
+      return;
+    }
     const v = videoRef.current;
     const c = canvasRef.current;
     if (!v || !c) return;
@@ -59,7 +77,31 @@ export default function ImageUpdate() {
     c.height = v.videoHeight || 480;
     const ctx = c.getContext('2d')!;
     ctx.drawImage(v, 0, 0, c.width, c.height);
-    const data = c.toDataURL('image/jpeg', 0.85);
+
+    // Detect face với tham số nhạy hơn
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 });
+    const detections = await faceapi.detectSingleFace(c, options).withFaceLandmarks();
+    if (!detections || !detections.detection) {
+      alert('Không phát hiện được khuôn mặt. Vui lòng thử lại!\nHãy đảm bảo mặt rõ, đủ sáng, chiếm phần lớn khung hình.');
+      return;
+    }
+    // Crop theo bounding box khuôn mặt
+    const box = detections.detection.box;
+    // Tăng padding một chút cho tự nhiên
+    const pad = 20;
+    const x = Math.max(0, box.x - pad);
+    const y = Math.max(0, box.y - pad);
+    const w = Math.min(c.width - x, box.width + pad * 2);
+    const h = Math.min(c.height - y, box.height + pad * 2);
+
+    // Tạo canvas tạm để crop
+    const faceCanvas = document.createElement('canvas');
+    faceCanvas.width = w;
+    faceCanvas.height = h;
+    const faceCtx = faceCanvas.getContext('2d')!;
+    faceCtx.drawImage(c, x, y, w, h, 0, 0, w, h);
+    const data = faceCanvas.toDataURL('image/jpeg', 0.95);
+
     const pos = POSITIONS[currentIdx].key;
     setImages(prev => ({ ...prev, [pos]: data }));
     setCurrentIdx(i => Math.min(i + 1, POSITIONS.length - 1));
@@ -147,8 +189,9 @@ export default function ImageUpdate() {
             <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button onClick={() => doCapture()} style={{ padding: '8px 12px' }}>Chụp</button>
-            <button onClick={startAuto} style={{ padding: '8px 12px' }}>Auto (3s)</button>
+            <button onClick={() => doCapture()} style={{ padding: '8px 12px' }} disabled={!modelLoaded}>Chụp</button>
+            <button onClick={startAuto} style={{ padding: '8px 12px' }} disabled={!modelLoaded}>Auto (3s)</button>
+              {!modelLoaded && <div style={{color:'red',marginTop:8}}>Đang tải model nhận diện khuôn mặt...</div>}
             <div style={{ marginLeft: 12 }}>Progress: {Object.keys(images).length}/{POSITIONS.length}</div>
             <button onClick={mockUpload} disabled={mockUploading || Object.keys(images).length < POSITIONS.length} style={{ marginLeft: 12, padding: '8px 12px' }}>{mockUploading ? 'Uploading...' : 'Mock Upload'}</button>
             {countdown !== null && <div style={{ marginLeft: 12, fontWeight: 700 }}>Đếm ngược: {countdown}</div>}

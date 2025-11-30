@@ -1,6 +1,7 @@
 
 from db.models import Nguoi
 from datetime import datetime
+import pytz
 import traceback
 from db.connection_helper import ConnectionHelper
 
@@ -134,8 +135,9 @@ class NguoiRepository(ConnectionHelper):
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         # Ensure timestamps are set to now if not provided
-        created_at = getattr(nguoi, 'created_at', None) or datetime.utcnow()
-        updated_at = getattr(nguoi, 'updated_at', None) or datetime.utcnow()
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        created_at = getattr(nguoi, 'created_at', None) or datetime.now(tz)
+        updated_at = getattr(nguoi, 'updated_at', None) or datetime.now(tz)
         with self as cursor:
             cursor.execute(sql, (
                 getattr(nguoi, 'id', None), nguoi.username, nguoi.pin, nguoi.full_name, nguoi.age, nguoi.address,
@@ -171,8 +173,9 @@ class NguoiRepository(ConnectionHelper):
                     except Exception:
                         pass
 
-                added_at = datetime.utcnow()
-                updated_at = datetime.utcnow()
+                tz = pytz.timezone('Asia/Ho_Chi_Minh')
+                added_at = datetime.now(tz)
+                updated_at = datetime.now(tz)
                 sql = "INSERT INTO khuonmat (user_id, image_id, image_url, added_at, updated_at) VALUES (%s, %s, %s, %s, %s)"
                 cursor.execute(sql, (user_id, image_id, image_bytes, added_at, updated_at))
                 return cursor.lastrowid
@@ -217,7 +220,8 @@ class NguoiRepository(ConnectionHelper):
         WHERE id = %s
         """
         # Ensure updated_at is set to now if not provided
-        updated_at = getattr(nguoi, 'updated_at', None) or datetime.utcnow()
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        updated_at = getattr(nguoi, 'updated_at', None) or datetime.now(tz)
         with self as cursor:
             cursor.execute(sql, (
                 nguoi.username, nguoi.pin, nguoi.full_name, nguoi.age, nguoi.address, nguoi.phone, nguoi.gender,
@@ -257,7 +261,8 @@ class NguoiRepository(ConnectionHelper):
         """Insert an emotion_log record. Returns lastrowid or None on failure."""
         try:
             with self as cursor:
-                captured_at = datetime.utcnow()
+                tz = pytz.timezone('Asia/Ho_Chi_Minh')
+                captured_at = datetime.now(tz)
                 sql = "INSERT INTO emotion_log (user_id, camera_id, emotion_type, confidence, image, captured_at, note) VALUES (%s, %s, %s, %s, %s, %s, %s)"
                 cursor.execute(sql, (user_id, camera_id, emotion_type, confidence, image_bytes, captured_at, note))
                 return cursor.lastrowid
@@ -316,7 +321,8 @@ class NguoiRepository(ConnectionHelper):
         """Insert a check-in record and return lastrowid."""
         try:
             with self as cursor:
-                now = datetime.utcnow()
+                tz = pytz.timezone('Asia/Ho_Chi_Minh')
+                now = datetime.now(tz)
                 sql = "INSERT INTO checklog (user_id, date, check_in, shift, status, edited_by, note) VALUES (%s, %s, %s, %s, %s, %s, %s)"
                 cursor.execute(sql, (user_id, now.date(), now, shift, status, edited_by, note))
                 return cursor.lastrowid

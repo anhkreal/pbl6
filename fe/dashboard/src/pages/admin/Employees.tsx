@@ -67,7 +67,18 @@ export default function Employees(){
               <tr key={e.id} style={{borderTop:'1px solid #ecf0f1'}}>
                 <td style={td}>{i+1}</td>
                 <td style={td}>
-                  {e.avatar_base64 ? <img src={`data:image/png;base64,${e.avatar_base64}`} style={{width:40,height:40,borderRadius:4}}/> : <div style={{width:40,height:40,background:'#ecf0f1',borderRadius:4}}/>}
+                  {e.avatar_base64
+                    ? (
+                        <img
+                          src={
+                            e.avatar_base64.startsWith('data:image')
+                              ? e.avatar_base64
+                              : `data:image/png;base64,${e.avatar_base64}`
+                          }
+                          style={{ width: 40, height: 40, borderRadius: 4 }}
+                        />
+                      )
+                    : <div style={{ width: 40, height: 40, background: '#ecf0f1', borderRadius: 4 }} />}
                 </td>
                 <td style={td}><button onClick={() => navigate('/admin/employeedetail?username=' + encodeURIComponent(String(e.username)))} style={{ background: 'transparent', border: 'none', padding: 0, color: '#3498db', cursor: 'pointer' }}>{e.fullName}</button></td>
                 <td style={td}>{e.shift==='day'?'Ngày':'Đêm'}</td>

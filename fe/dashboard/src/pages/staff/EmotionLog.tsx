@@ -161,7 +161,17 @@ export default function StaffEmotionLog() {
                 <td style={td}><span style={badge(l.emotion)}>{l.emotion}</span></td>
                 <td style={td}>
                   {l.frameImage
-                    ? <img src={l.frameImage} alt="" style={{ width: 46, height: 46, borderRadius: 4, objectFit: 'cover' }} />
+                    ? (
+                        <img
+                          src={
+                            l.frameImage.startsWith('data:image')
+                              ? l.frameImage
+                              : `data:image/jpeg;base64,${l.frameImage}`
+                          }
+                          alt=""
+                          style={{ width: 46, height: 46, borderRadius: 4, objectFit: 'cover' }}
+                        />
+                      )
                     : '--'}
                 </td>
                 <td style={td}>{l.userId ?? '--'}</td>
