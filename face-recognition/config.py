@@ -3,8 +3,10 @@
 # Updated: August 2025
 
 # AI Model Configuration
+MODEL_PATH = 'model/glint360k_cosface_r100_fp16_0.1.pth'  # Primary ArcFace model
+MODEL_VERSION = 'r100'
 # MODEL_PATH = 'model/glint360k_cosface_r18_fp16_0.1.pth'  # Primary ArcFace model
-MODEL_PATH = 'model/glint360k_cosface_r18_fp16_0.1.pth'  # Primary ArcFace model
+# MODEL_VERSION = 'r18'
 AGE_MODEL=  'model/ModelAge.pth' # Age prediction model
 GENDER_MODEL = 'model/ModelGender.pth' # Gender prediction model
 

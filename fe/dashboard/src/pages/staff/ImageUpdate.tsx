@@ -3,6 +3,11 @@ import * as faceapi from 'face-api.js';
 import StaffLayout from '../../layouts/StaffLayout';
 import { apiFetch } from '../../api/http';
 import { buildUrl } from '../../api/base';
+declare global {
+  interface Window {
+    cv: any;
+  }
+}
 
 const POSITIONS = [
   { key: 'frontal1', label: 'Chính diện 1' },
@@ -78,23 +83,51 @@ export default function ImageUpdate() {
     const ctx = c.getContext('2d')!;
     ctx.drawImage(v, 0, 0, c.width, c.height);
 
-    // Detect face với tham số nhạy hơn
+    // Detect face bằng Haar Cascade qua opencv.js
+    if (window.cv && window.cv.CascadeClassifier) {
+      // Đọc ảnh từ canvas
+      const src = window.cv.imread(c);
+      const gray = new window.cv.Mat();
+      window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY, 0);
+      const faceCascade = new window.cv.CascadeClassifier();
+      // Đường dẫn model haarcascade_frontalface_default.xml
+      faceCascade.load('model/haarcascade_frontalface_default.xml');
+      const faces = new window.cv.RectVector();
+      faceCascade.detectMultiScale(gray, faces, 1.1, 5, 0);
+      if (faces.size() === 0) {
+        alert('Không phát hiện được khuôn mặt bằng Haar Cascade.');
+        src.delete(); gray.delete(); faces.delete(); faceCascade.delete();
+        return;
+      }
+      const face = faces.get(0);
+      // Crop khuôn mặt
+      const cropped = src.roi(face);
+      // Tạo canvas tạm để xuất ảnh
+      const faceCanvas = document.createElement('canvas');
+      faceCanvas.width = face.width;
+      faceCanvas.height = face.height;
+      window.cv.imshow(faceCanvas, cropped);
+      const data = faceCanvas.toDataURL('image/jpeg', 0.95);
+      src.delete(); gray.delete(); faces.delete(); faceCascade.delete(); cropped.delete();
+      const pos = POSITIONS[currentIdx].key;
+      setImages(prev => ({ ...prev, [pos]: data }));
+      setCurrentIdx(i => Math.min(i + 1, POSITIONS.length - 1));
+      return;
+    }
+    // Nếu không có opencv.js, fallback về face-api.js
     const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 });
     const detections = await faceapi.detectSingleFace(c, options).withFaceLandmarks();
     if (!detections || !detections.detection) {
       alert('Không phát hiện được khuôn mặt. Vui lòng thử lại!\nHãy đảm bảo mặt rõ, đủ sáng, chiếm phần lớn khung hình.');
       return;
     }
-    // Crop theo bounding box khuôn mặt
+    // Crop theo bounding box khuôn mặt (TinyFaceDetector)
     const box = detections.detection.box;
-    // Tăng padding một chút cho tự nhiên
-    const pad = 20;
+    const pad = 0;
     const x = Math.max(0, box.x - pad);
     const y = Math.max(0, box.y - pad);
     const w = Math.min(c.width - x, box.width + pad * 2);
     const h = Math.min(c.height - y, box.height + pad * 2);
-
-    // Tạo canvas tạm để crop
     const faceCanvas = document.createElement('canvas');
     faceCanvas.width = w;
     faceCanvas.height = h;
@@ -113,6 +146,17 @@ export default function ImageUpdate() {
     const idx = POSITIONS.findIndex(p => p.key === posKey);
     if (idx >= 0) setCurrentIdx(idx);
     setImages(prev => { const n = { ...prev }; delete n[posKey]; return n; });
+  }
+
+  function handleUpload(posKey: string, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setImages(prev => ({ ...prev, [posKey]: dataUrl }));
+    };
+    reader.readAsDataURL(file);
   }
 
   async function mockUpload() {
@@ -209,8 +253,26 @@ export default function ImageUpdate() {
                     <div style={{ fontSize: 12, color: '#666' }}>{images[p.key] ? 'Đã chụp' : (idx < currentIdx ? 'Bỏ qua' : 'Chưa')}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    {images[p.key] && <img src={images[p.key]} alt={p.key} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />}
-                    {images[p.key] && <div><button onClick={() => retake(p.key)} style={{ marginTop: 6 }}>Retake</button></div>}
+                    {images[p.key] && <>
+                      <img src={images[p.key]} alt={p.key} style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                      <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                        {(() => {
+                          const img = new window.Image();
+                          img.src = images[p.key];
+                          if (img.width && img.height) {
+                            return `${img.width}x${img.height}`;
+                          }
+                          return '';
+                        })()}
+                      </div>
+                    </>}
+                    <div style={{ marginTop: 6 }}>
+                      <button onClick={() => retake(p.key)} disabled={!images[p.key]}>Retake</button>
+                      <label style={{ marginLeft: 8 }}>
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleUpload(p.key, e)} />
+                        <span style={{ cursor: 'pointer', color: '#1976d2', textDecoration: 'underline' }}>Upload</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
               </li>

@@ -56,7 +56,7 @@ async def query_face_service(file: UploadFile = File(...)):
         results = faiss_manager.query(emb, topk=1)
     
     # Threshold 0.42 chosen based on model validation: scores above 0.42 indicate a confident match.
-    if results and results[0]['score'] > 0.42:
+    if results and results[0]['score'] > 0.27:
         class_id = str(results[0]['class_id'])
         try:
                 nguoi = nguoi_repo.get_by_id(int(class_id))

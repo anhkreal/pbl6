@@ -222,34 +222,44 @@ async def query_and_checkin(
     await image.seek(0)
     result = await face_query_service(image)
     if result and not result.get('error'):
-        # only proceed if we have a class_id
         class_id = result.get('class_id')
         if class_id:
             try:
                 from datetime import datetime
                 import pytz
+                from db.nguoi_repository import NguoiRepository
+                from service.kpi_service import get_kpi_by_user_and_date_service
                 tz = pytz.timezone('Asia/Ho_Chi_Minh')
                 now = datetime.now(tz)
-                checkin_res = svc_checkin(user_id=int(class_id), edited_by=None, note=None)
-
-                # Gọi trực tiếp hàm add_kpi
-                from api.kpi import add_kpi
-                kpi_kwargs = {
-                    "user_id": int(class_id),
-                    "date": now.strftime("%Y-%m-%d"),
-                    "emotion_score": 100,
-                    "attendance_score": 100,
-                    "total_score": 100 * 0.3 + 100 * 0.7,
-                    "remark": str(100 * 0.3 + 100 * 0.7)
-                }
-                # Gọi hàm async add_kpi (dùng await)
-                kpi_result = await add_kpi(**kpi_kwargs)
-                print(f"[debug] Gọi add_kpi trực tiếp với: {kpi_kwargs}, response: {kpi_result.body.decode()}")
+                today = now.date()
+                nguoi_repo = NguoiRepository()
+                # Kiểm tra đã có checklog chưa
+                checklog = nguoi_repo.find_checklog_by_user_and_date(int(class_id), today)
+                if checklog:
+                    checkin_res = {"success": False, "message": "Đã tồn tại checklog cho user này trong ngày hiện tại."}
+                else:
+                    checkin_res = svc_checkin(user_id=int(class_id), edited_by=None, note=None)
+                    # Kiểm tra đã có KPI cho user_id trong ngày hiện tại chưa
+                    kpi_res = get_kpi_by_user_and_date_service(int(class_id), str(today))
+                    if not (kpi_res.get('success') and kpi_res.get('kpi')):
+                        # Chưa có KPI, mới tạo mới
+                        from api.kpi import add_kpi
+                        kpi_kwargs = {
+                            "user_id": int(class_id),
+                            "date": now.strftime("%Y-%m-%d"),
+                            "emotion_score": 100,
+                            "attendance_score": 100,
+                            "total_score": 100 * 0.3 + 100 * 0.7,
+                            "remark": str(100 * 0.3 + 100 * 0.7)
+                        }
+                        kpi_result = await add_kpi(**kpi_kwargs)
+                        print(f"[debug] Gọi add_kpi trực tiếp với: {kpi_kwargs}, response: {kpi_result.body.decode()}")
+                    else:
+                        print(f"[debug] KPI đã tồn tại cho user_id {class_id} trong ngày {today}, không tạo mới.")
             except Exception as e:
                 checkin_res = {"success": False, "message": f"Lỗi khi checkin: {e}"}
         else:
             checkin_res = {"success": False, "message": "Không xác định class_id"}
-        # merge results
         merged = {**result, 'checkin': checkin_res}
         return JSONResponse(content=merged, status_code=200)
     else:

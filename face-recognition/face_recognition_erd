@@ -1,0 +1,63 @@
+// Face Recognition Database ERD
+digraph {
+	fontsize=16 rankdir=LR
+	nguoi [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0">
+  <TR><TD COLSPAN="2"><B>nguoi</B></TD></TR>
+  <TR><TD>id</TD><TD>PK</TD></TR>
+  <TR><TD>ten</TD><TD></TD></TR>
+  <TR><TD>ngaysinh</TD><TD></TD></TR>
+  <TR><TD>gioitinh</TD><TD></TD></TR>
+  <TR><TD>class_id</TD><TD></TD></TR>
+  <TR><TD>img_path</TD><TD></TD></TR>
+  <TR><TD>created_at</TD><TD></TD></TR>
+  <TR><TD>updated_at</TD><TD></TD></TR>
+</TABLE>> shape=plaintext]
+	taikhoan [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0">
+  <TR><TD COLSPAN="2"><B>taikhoan</B></TD></TR>
+  <TR><TD>id</TD><TD>PK</TD></TR>
+  <TR><TD>username</TD><TD></TD></TR>
+  <TR><TD>password_hash</TD><TD></TD></TR>
+  <TR><TD>nguoi_id</TD><TD>FK</TD></TR>
+  <TR><TD>role</TD><TD></TD></TR>
+  <TR><TD>created_at</TD><TD></TD></TR>
+  <TR><TD>updated_at</TD><TD></TD></TR>
+</TABLE>> shape=plaintext]
+	embedding [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0">
+  <TR><TD COLSPAN="2"><B>embedding</B></TD></TR>
+  <TR><TD>id</TD><TD>PK</TD></TR>
+  <TR><TD>nguoi_id</TD><TD>FK</TD></TR>
+  <TR><TD>embedding</TD><TD></TD></TR>
+  <TR><TD>img_path</TD><TD></TD></TR>
+  <TR><TD>created_at</TD><TD></TD></TR>
+</TABLE>> shape=plaintext]
+	emotion_log [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0">
+  <TR><TD COLSPAN="2"><B>emotion_log</B></TD></TR>
+  <TR><TD>id</TD><TD>PK</TD></TR>
+  <TR><TD>nguoi_id</TD><TD>FK</TD></TR>
+  <TR><TD>emotion</TD><TD></TD></TR>
+  <TR><TD>score</TD><TD></TD></TR>
+  <TR><TD>timestamp</TD><TD></TD></TR>
+</TABLE>> shape=plaintext]
+	checklog [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0">
+  <TR><TD COLSPAN="2"><B>checklog</B></TD></TR>
+  <TR><TD>id</TD><TD>PK</TD></TR>
+  <TR><TD>nguoi_id</TD><TD>FK</TD></TR>
+  <TR><TD>checkin_time</TD><TD></TD></TR>
+  <TR><TD>checkout_time</TD><TD></TD></TR>
+  <TR><TD>emotion</TD><TD></TD></TR>
+  <TR><TD>kpi_score</TD><TD></TD></TR>
+</TABLE>> shape=plaintext]
+	kpi [label=<<TABLE BORDER="1" CELLBORDER="1" CELLSPACING="0">
+  <TR><TD COLSPAN="2"><B>kpi</B></TD></TR>
+  <TR><TD>id</TD><TD>PK</TD></TR>
+  <TR><TD>nguoi_id</TD><TD>FK</TD></TR>
+  <TR><TD>date</TD><TD></TD></TR>
+  <TR><TD>score</TD><TD></TD></TR>
+  <TR><TD>details</TD><TD></TD></TR>
+</TABLE>> shape=plaintext]
+	taikhoan -> nguoi [label=nguoi_id]
+	embedding -> nguoi [label=nguoi_id]
+	emotion_log -> nguoi [label=nguoi_id]
+	checklog -> nguoi [label=nguoi_id]
+	kpi -> nguoi [label=nguoi_id]
+}

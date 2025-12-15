@@ -4,8 +4,7 @@ declare global {
 
 // Default to this local IP:port when no env var or window override is provided.
 // Keep existing behavior of preferring VITE_API_URL then window.__API_BASE__.
-// let RAW_BASE = (import.meta as any).env?.VITE_API_URL || (window as any).__API_BASE__ || 'http://192.168.1.2:8000';
-let RAW_BASE =  'http://127.0.0.1:8000';
+let RAW_BASE = (import.meta as any).env?.VITE_API_URL || (window as any).__API_BASE__ || 'http://127.0.0.1:8000';
 let API_BASE = RAW_BASE.trim().replace(/\/+$/, '');
 if (!API_BASE) {
   console.warn('[api] VITE_API_URL not set. Using relative requests. Create .env.local with: VITE_API_URL=http://localhost:8000');

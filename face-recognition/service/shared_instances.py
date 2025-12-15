@@ -27,6 +27,7 @@ class SharedInstances:
             # Feature Extractor - chỉ tạo 1 lần
             self.extractor = ArcFaceFeatureExtractor(
                 model_path=MODEL_PATH, 
+                model_version=MODEL_VERSION,
                 device=None
             )
             

@@ -46,7 +46,40 @@ export default function StaffKPIReport() {
     return () => { ignore = true; }
   }, [mode, day, month]);
 
-  const data = items;
+  const getRemark = (score: number): string => {
+    if (score < 60) return 'Cảnh cáo nặng';
+    if (score <= 75) return 'Cần cố gắng';
+    if (score <= 85) return 'Ổn';
+    return 'Tốt/Xuất sắc';
+  };
+
+  const processedData = React.useMemo(() => {
+    if (mode === 'month' && items.length > 0) {
+      const totalRecords = items.length;
+      const sum = items.reduce((acc, item) => {
+        acc.attendanceScore += item.attendanceScore;
+        acc.emotionScore += item.emotionScore;
+        acc.totalScore += item.totalScore;
+        return acc;
+      }, { attendanceScore: 0, emotionScore: 0, totalScore: 0 });
+
+      const avgTotalScore = sum.totalScore / totalRecords;
+      
+      const aggregatedData: KPIItem = {
+        id: -1, // Mock ID for aggregated data
+        userName: items[0]?.userName || 'Aggregated',
+        date: month,
+        attendanceScore: sum.attendanceScore / totalRecords,
+        emotionScore: sum.emotionScore / totalRecords,
+        totalScore: avgTotalScore,
+        remark: getRemark(avgTotalScore),
+      };
+      return [aggregatedData];
+    }
+    return items;
+  }, [items, mode, month]);
+
+  const data = processedData;
 
   return (
     <StaffLayout>
