@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import StaffLayout from '../../layouts/StaffLayout';
 import { apiFetch } from '../../api/http';
+import ErrorBanner from '../../components/ErrorBanner';
 
 export default function Contact() {
   const [admins, setAdmins] = useState<Array<{ name: string; address?: string; phone?: string }>>([]);
@@ -26,17 +27,21 @@ export default function Contact() {
   return (
     <StaffLayout>
       <h1 style={{ marginBottom: 16 }}>Liên hệ</h1>
-      <div style={{ background: '#fff', padding: 20, borderRadius: 10, maxWidth: 640 }}>
-        {loading && <div>Đang tải...</div>}
-        {error && <div style={{ color: 'red' }}>{error}</div>}
-        {!loading && !error && admins.length === 0 && <div>Không tìm thấy admin</div>}
-        {!loading && !error && admins.map((a, i) => (
-          <div key={i} style={{ marginBottom: 12, padding: 12, borderRadius: 6, background: '#f9f9f9' }}>
-            <Row label="Tên" value={a.name} />
-            <Row label="Địa chỉ" value={a.address || '--'} />
-            <Row label="SĐT" value={a.phone || '--'} />
-          </div>
-        ))}
+      <div className="card" style={{ maxWidth: 640 }}>
+        <div className="card-body">
+          {loading && <div>Đang tải...</div>}
+          {error && <ErrorBanner message={error} onRetry={()=>window.location.reload()} />}
+          {!loading && !error && admins.length === 0 && <div>Không tìm thấy admin</div>}
+          {!loading && !error && admins.map((a, i) => (
+            <div key={i} className="card" style={{ marginBottom: 12 }}>
+              <div className="card-body">
+                <Row label="Tên" value={a.name} />
+                <Row label="Địa chỉ" value={a.address || '--'} />
+                <Row label="SĐT" value={a.phone || '--'} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </StaffLayout>
   );

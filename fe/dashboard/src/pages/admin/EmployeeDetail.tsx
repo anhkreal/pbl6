@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import AdminLayout from '../../layouts/AdminLayout';
 import { apiFetch } from '../../api/http';
+import ErrorBanner from '../../components/ErrorBanner';
 
 export default function EmployeeDetail() {
   const location = useLocation();
@@ -39,12 +40,13 @@ export default function EmployeeDetail() {
         </div>
       </div>
 
-      {loading && <div style={{ background: '#fff', padding: 24, borderRadius: 8 }}>Đang tải...</div>}
-      {error && <div style={{ background: '#fff', padding: 24, borderRadius: 8, color: 'red' }}>{error}</div>}
-      {!loading && !user && !error && <div style={{ background: '#fff', padding: 24, borderRadius: 8 }}>Không tìm thấy nhân viên.</div>}
+      {loading && <div className="card"><div className="card-body">Đang tải...</div></div>}
+      {error && <div className="card"><div className="card-body"><ErrorBanner message={error} /></div></div>}
+      {!loading && !user && !error && <div className="card"><div className="card-body">Không tìm thấy nhân viên.</div></div>}
       {user && (
         <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 20 }}>
-          <div style={{ background: '#fff', padding: 20, borderRadius: 8, textAlign: 'center' }}>
+          <div className="card" style={{ textAlign: 'center' }}>
+            <div className="card-body">
             <div style={{ width: 120, height: 120, margin: '0 auto', borderRadius: '50%', background: '#ecf0f1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, color: '#7f8c8d' }}>
               {user.full_name ? user.full_name.split(' ').map((s:string)=>s[0]).slice(-2).join('') : (user.username || 'U').toUpperCase().slice(0,2)}
             </div>
@@ -54,9 +56,11 @@ export default function EmployeeDetail() {
               <div style={{ fontSize: 12, color: '#7f8c8d' }}>Mã PIN</div>
               <div style={{ fontWeight: 600 }}>{user.pin ? '••••••' : '—'}</div>
             </div>
+            </div>
           </div>
 
-          <div style={{ background: '#fff', padding: 20, borderRadius: 8 }}>
+          <div className="card">
+            <div className="card-body">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <Field label="ID" value={user.id} />
               <Field label="Username" value={user.username} />
@@ -67,6 +71,7 @@ export default function EmployeeDetail() {
               <div style={{ gridColumn: '1 / -1' }}><Field label="Địa chỉ" value={user.address} /></div>
               <div style={{ gridColumn: '1 / -1' }}><Field label="Trạng thái" value={user.status === 'working' ? 'Đang làm' : 'Nghỉ'} /></div>
               <div style={{ gridColumn: '1 / -1', color:'#95a5a6', fontSize:13, marginTop:6 }}>Tạo: {user.created_at ?? ''} — Cập nhật: {user.updated_at ?? ''}</div>
+            </div>
             </div>
           </div>
         </div>

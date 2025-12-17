@@ -25,7 +25,8 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   try {
     res = await fetch(url, { ...options, headers });
   } catch (netErr: any) {
-    throw new Error(`Network error: ${netErr.message || netErr}`);
+    console.error('[apiFetch] Network error', netErr);
+    throw new Error('Không thể kết nối máy chủ. Vui lòng kiểm tra mạng và thử lại.');
   }
 
   const status = res.status;
@@ -34,7 +35,8 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   if (status === 401) {
     sessionStorage.clear();
-    throw new Error('Unauthorized (401)');
+    console.warn('[apiFetch] Unauthorized, clearing session');
+    throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
   }
 
   if (status === 204) return {} as T;
@@ -42,24 +44,45 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   // If not JSON, read text and throw a clearer error
   if (!isJson) {
     const text = await res.text();
-    const snippet = text.slice(0, 200).replace(/\s+/g, ' ');
-    throw new Error(`Unexpected non-JSON response (status ${status}) at ${path}: ${snippet}`);
+    console.error('[apiFetch] Unexpected non-JSON response', { status, path, preview: text.slice(0,200) });
+    throw new Error('Phản hồi không hợp lệ từ máy chủ. Vui lòng thử lại sau.');
   }
 
   let data: any;
   try {
     data = await res.json();
   } catch (parseErr: any) {
-    throw new Error(`JSON parse error (status ${status}) at ${path}: ${parseErr.message}`);
+    console.error('[apiFetch] JSON parse error', { status, path, error: parseErr });
+    throw new Error('Dữ liệu trả về không hợp lệ. Vui lòng thử lại.');
   }
 
   if (!res.ok) {
-    // If backend returned structured JSON (validation errors), include it verbatim for debugging
-    const message = (data && (data.message || data.detail)) || data || `HTTP ${status}`;
-    const text = typeof message === 'string' ? message : JSON.stringify(message);
-    console.debug('[apiFetch] Response error', { status, url, body: data });
-    throw new Error(text);
+    // Log full details to console, but throw a friendly message to UI
+    console.error('[apiFetch] Response error', { status, url, body: data });
+    const userMessage = friendlyMessageForStatus(status, data);
+    throw new Error(userMessage);
   }
 
   return data as T;
+}
+
+function friendlyMessageForStatus(status: number, body: any): string {
+  try {
+    const backendMsg = typeof body === 'string' ? body : (body?.message || body?.detail || '').toString();
+    // Prefer specific backend validation errors if short and user-facing
+    if (status === 422 && backendMsg && backendMsg.length < 160) return `Dữ liệu không hợp lệ: ${backendMsg}`;
+  } catch {}
+  switch (status) {
+    case 400: return 'Yêu cầu không hợp lệ. Vui lòng kiểm tra dữ liệu nhập.';
+    case 401: return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+    case 403: return 'Bạn không có quyền thực hiện thao tác này.';
+    case 404: return 'Không tìm thấy dữ liệu hoặc đường dẫn không đúng.';
+    case 409: return 'Xung đột dữ liệu. Vui lòng thử lại hoặc làm mới trang.';
+    case 429: return 'Quá nhiều yêu cầu. Vui lòng thử lại sau.';
+    case 500: return 'Lỗi hệ thống. Vui lòng thử lại sau.';
+    case 502: return 'Máy chủ đang bảo trì. Vui lòng thử lại sau.';
+    case 503: return 'Dịch vụ tạm thời không sẵn sàng. Vui lòng thử lại.';
+    case 504: return 'Hết thời gian chờ phản hồi. Vui lòng thử lại sau.';
+    default: return 'Đã xảy ra lỗi. Vui lòng thử lại.';
+  }
 }

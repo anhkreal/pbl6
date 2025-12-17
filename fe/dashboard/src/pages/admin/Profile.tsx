@@ -134,43 +134,49 @@ export default function AdminProfile() {
       <h1 style={{ marginBottom: 16 }}>Thông tin cá nhân</h1>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-        <section style={{ background: '#fff', padding: 16, borderRadius: 8 }}>
+        <section className="card">
+          <div className="card-body">
           <h3>Thông tin cá nhân</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input placeholder="Tên" value={name} onChange={e => setName(e.target.value)} style={inp} />
-            <input placeholder="Tuổi" value={age} onChange={e => setAge(e.target.value)} style={inp} />
-            <input placeholder="Nơi ở" value={address} onChange={e => setAddress(e.target.value)} style={inp} />
-            <input placeholder="SĐT" value={phone} onChange={e => setPhone(e.target.value)} style={inp} />
+            <input placeholder="Tên" value={name} onChange={e => setName(e.target.value)} />
+            <input placeholder="Tuổi" value={age} onChange={e => setAge(e.target.value)} />
+            <input placeholder="Nơi ở" value={address} onChange={e => setAddress(e.target.value)} />
+            <input placeholder="SĐT" value={phone} onChange={e => setPhone(e.target.value)} />
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={submitProfile} style={btnPrimary}>Cập nhật</button>
+              <button className="btn btn-primary" onClick={submitProfile}>Cập nhật</button>
               <div style={{ alignSelf: 'center', color: profileMsg.includes('thành công') ? 'green' : 'red' }}>{profileMsg}</div>
             </div>
           </div>
-        </section>
-
-        <section style={{ background: '#fff', padding: 16, borderRadius: 8 }}>
-          <h3>Đổi mật khẩu</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input type="password" placeholder="Mật khẩu cũ" value={oldPassword} onChange={e => setOldPassword(e.target.value)} style={inp} />
-            <input type="password" placeholder="Mật khẩu mới" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={inp} />
-            <input type="password" placeholder="Xác nhận mật khẩu" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} style={inp} />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={submitPassword} style={btnPrimary}>Đổi mật khẩu</button>
-              <div style={{ alignSelf: 'center', color: passwordMsg.includes('thành công') ? 'green' : 'red' }}>{passwordMsg}</div>
-            </div>
           </div>
         </section>
 
-        <section style={{ background: '#fff', padding: 16, borderRadius: 8 }}>
+        <section className="card">
+          <div className="card-body">
+          <h3>Đổi mật khẩu</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input type="password" placeholder="Mật khẩu cũ" value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+            <input type="password" placeholder="Mật khẩu mới" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+            <input type="password" placeholder="Xác nhận mật khẩu" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" onClick={submitPassword}>Đổi mật khẩu</button>
+              <div style={{ alignSelf: 'center', color: passwordMsg.includes('thành công') ? 'green' : 'red' }}>{passwordMsg}</div>
+            </div>
+          </div>
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="card-body">
           <h3>Đổi mã PIN</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input type="password" placeholder="PIN cũ" value={oldPin} onChange={e => setOldPin(e.target.value)} style={inp} />
-            <input type="password" placeholder="PIN mới" value={newPin} onChange={e => setNewPin(e.target.value)} style={inp} />
-            <input type="password" placeholder="Xác nhận PIN" value={confirmPin} onChange={e => setConfirmPin(e.target.value)} style={inp} />
+            <input type="password" placeholder="PIN cũ" value={oldPin} onChange={e => setOldPin(e.target.value)} />
+            <input type="password" placeholder="PIN mới" value={newPin} onChange={e => setNewPin(e.target.value)} />
+            <input type="password" placeholder="Xác nhận PIN" value={confirmPin} onChange={e => setConfirmPin(e.target.value)} />
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={submitPin} style={btnPrimary}>Đổi PIN</button>
+              <button className="btn btn-primary" onClick={submitPin}>Đổi PIN</button>
               <div style={{ alignSelf: 'center', color: pinMsg.includes('thành công') ? 'green' : 'red' }}>{pinMsg}</div>
             </div>
+          </div>
           </div>
         </section>
       </div>
@@ -180,4 +186,3 @@ export default function AdminProfile() {
 }
 
 const inp: React.CSSProperties = { padding: 8, border: '1px solid #ccc', borderRadius: 4 };
-const btnPrimary: React.CSSProperties = { padding: '8px 12px', background: '#3498db', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' };

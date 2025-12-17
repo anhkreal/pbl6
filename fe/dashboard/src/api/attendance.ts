@@ -56,5 +56,6 @@ export async function fetchCheckLogs(q: CheckLogQuery = {}): Promise<CheckLogRes
 }
 
 export async function patchAttendanceStatus(id: number): Promise<void> {
-  await apiFetch(`/attendance/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'normal' }) });
+  // Backend endpoint: PUT /edit-checklog/{id} with JSON body { status }
+  await apiFetch(`/edit-checklog/${id}`, { method: 'PUT', body: JSON.stringify({ status: 'normal' }) });
 }

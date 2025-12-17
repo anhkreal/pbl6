@@ -2,15 +2,25 @@ import React, { useEffect, useState } from 'react';
 import StaffLayout from '../../layouts/StaffLayout';
 import { fetchCheckLogs, AttendanceRow } from '../../api/attendance';
 import { apiFetch } from '../../api/http';
+import ErrorBanner from '../../components/ErrorBanner';
 
 export default function StaffAttendance() {
-  const [day, setDay] = useState('2025-01-28');
+  function todayGmt7() {
+    const nowUtc = Date.now();
+    const gmt7 = new Date(nowUtc + 7 * 60 * 60 * 1000);
+    const y = gmt7.getUTCFullYear();
+    const m = String(gmt7.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(gmt7.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const [day, setDay] = useState(todayGmt7());
   const [rows, setRows] = useState<AttendanceRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -66,40 +76,42 @@ export default function StaffAttendance() {
       }
     })();
     return () => { ignore = true; }
-  }, [day, limit, offset]);
+  }, [day, limit, offset, refresh]);
 
   return (
     <StaffLayout>
       <h1 style={{ marginBottom: 18 }}>Chấm công (Xem theo ngày)</h1>
-      <div style={{ background: '#fff', padding: 16, borderRadius: 8, marginBottom: 16 }}>
-        <input type="date" value={day} onChange={e => setDay(e.target.value)} style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }} />
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-body">
+          <input type="date" value={day} onChange={e => setDay(e.target.value)} />
+        </div>
       </div>
-      <div style={{ background: '#fff', borderRadius: 8 }}>
-        {loading && <div style={{ padding: 10 }}>Đang tải...</div>}
-        {error && <div style={{ padding: 10, color: 'red' }}>{error}</div>}
+      <div className="card">
+        {loading && <div className="card-body">Đang tải...</div>}
+        {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
         {!loading && !error && (
           <>
-          <div style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>Tổng: <strong>{total ?? 0}</strong></div>
             <div>
-              <button disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
-              <button style={{ marginLeft: 8 }} disabled={offset + limit >= (total ?? 0)} onClick={() => setOffset(offset + limit)}>Next</button>
+              <button className="btn btn-ghost" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
+              <button className="btn btn-ghost" style={{ marginLeft: 8 }} disabled={offset + limit >= (total ?? 0)} onClick={() => setOffset(offset + limit)}>Next</button>
             </div>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={headRow}>{['STT', 'Ngày', 'Check in', 'Check out', 'Giờ làm', 'Trạng thái'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <table className="table">
+            <thead><tr>{['STT', 'Ngày', 'Check in', 'Check out', 'Giờ làm', 'Trạng thái'].map(h => <th key={h}>{h}</th>)}</tr></thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={r.id} style={row}>
-                  <td style={td}>{offset + i + 1}</td>
-                  <td style={td}>{r.date}</td>
-                  <td style={td}>{r.checkIn || '--'}</td>
-                  <td style={td}>{r.checkOut || '--'}</td>
-                  <td style={td}>{r.totalHours != null ? r.totalHours.toFixed(1) : '--'}</td>
-                  <td style={td}><span style={statusBadge(r.status)}>{statusLabel(r.status)}</span></td>
+                <tr key={r.id}>
+                  <td>{offset + i + 1}</td>
+                  <td>{r.date}</td>
+                  <td>{r.checkIn || '--'}</td>
+                  <td>{r.checkOut || '--'}</td>
+                  <td>{r.totalHours != null ? r.totalHours.toFixed(1) : '--'}</td>
+                  <td><span className={statusBadgeClass(r.status)}>{statusLabel(r.status)}</span></td>
                 </tr>
               ))}
-              {!rows.length && <tr><td style={{ padding: 16 }} colSpan={6}>Không có dữ liệu</td></tr>}
+              {!rows.length && <tr><td colSpan={6} style={{ padding: 16 }}>Không có dữ liệu</td></tr>}
             </tbody>
           </table>
           </>
@@ -112,13 +124,13 @@ export default function StaffAttendance() {
 function statusLabel(s: AttendanceRow['status']) {
   return { late: 'Đi trễ', early: 'Về sớm', working: 'Đang làm việc', normal: 'Bình thường', absent: 'Vắng' }[s];
 }
-function statusBadge(s: AttendanceRow['status']): React.CSSProperties {
-  const c: Record<AttendanceRow['status'], string> = {
-    late: '#e74c3c', early: '#f39c12', working: '#16a085', normal: '#3498db', absent: '#7f8c8d'
+function statusBadgeClass(s: AttendanceRow['status']): string {
+  const m: Record<AttendanceRow['status'], string> = {
+    late: 'badge badge-danger',
+    early: 'badge badge-warning',
+    working: 'badge badge-success',
+    normal: 'badge badge-info',
+    absent: 'badge'
   };
-  return { background: c[s], color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: 12 };
+  return m[s] || 'badge';
 }
-const headRow: React.CSSProperties = { background: '#f5f5f5' };
-const th: React.CSSProperties = { padding: 10, fontSize: 12, textTransform: 'uppercase', color: '#7f8c8d', letterSpacing: '.5px', textAlign: 'left' };
-const row: React.CSSProperties = { borderTop: '1px solid #ecf0f1' };
-const td: React.CSSProperties = { padding: 10, fontSize: 14 };

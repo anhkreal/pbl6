@@ -145,16 +145,6 @@ export async function fetchEmotionLogsForUser(userId: number, opts: Omit<Emotion
   return fetchEmotionLogs({ ...opts, user_id: uid });
 }
 
-export async function deleteEmotionLog(id: number, pin: string): Promise<void> {
-  // legacy helper: delete via /emotions/{id}
-  await apiFetch(`/emotions/${id}`, { method: 'DELETE' });
-}
-
-export async function deleteEmotionLogsByUser(userId: number, pin: string): Promise<void> {
-  // assume backend supports deleting by user id with PIN verification
-  return apiFetch(`/emotions/user/${userId}`, { method: 'DELETE', body: JSON.stringify({ pin }) });
-}
-
 // New API: delete a single emotion log using /delete-emotion/{id}
 export async function deleteEmotionById(id: number, pin?: string): Promise<{ success: boolean; message?: string }> {
   // Backend expects DELETE for /delete-emotion/{id}.

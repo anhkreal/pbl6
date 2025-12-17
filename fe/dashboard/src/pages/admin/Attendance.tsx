@@ -2,9 +2,18 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { fetchCheckLogs, patchAttendanceStatus, AttendanceRow } from '../../api/attendance';
 import { verifyPin } from '../../api/pin';
+import ErrorBanner from '../../components/ErrorBanner';
 
 export default function AdminAttendance(){
-  const [day, setDay] = useState('2025-01-28');
+  function todayGmt7() {
+    const nowUtc = Date.now();
+    const gmt7 = new Date(nowUtc + 7 * 60 * 60 * 1000);
+    const y = gmt7.getUTCFullYear();
+    const m = String(gmt7.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(gmt7.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const [day, setDay] = useState(todayGmt7());
   const [name, setName] = useState('');
   const [editId, setEditId] = useState<number | null>(null);
   const [pinValue, setPinValue] = useState('');
@@ -14,6 +23,7 @@ export default function AdminAttendance(){
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -32,7 +42,7 @@ export default function AdminAttendance(){
       }
     })();
     return () => { ignore = true; };
-  }, [day, name, limit, offset]);
+  }, [day, name, limit, offset, refresh]);
 
   const handleEdit = (recordId: number) => {
     setEditId(recordId);
@@ -56,91 +66,70 @@ export default function AdminAttendance(){
 
   return (
     <AdminLayout>
-      <h1 style={{ marginBottom: '20px', fontSize: '28px', color: '#2c3e50' }}>Quản lý chấm công</h1>
+      <h1 style={{ marginBottom: 18 }}>Quản lý chấm công</h1>
 
-      <div style={{ marginBottom: '20px', backgroundColor: 'white', padding: '15px', borderRadius: '8px' }}>
-        <label style={{ marginRight: '10px', fontWeight: 'bold' }}>Chọn ngày:</label>
-        <input
-          type="date"
-          value={day}
-          onChange={(e) => setDay(e.target.value)}
-          style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
-        />
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-body">
+          <label style={{ marginRight: 10, fontWeight: 600 }}>Chọn ngày:</label>
+          <input
+            type="date"
+            value={day}
+            onChange={(e) => setDay(e.target.value)}
+          />
+        </div>
       </div>
 
-      <div style={{ backgroundColor: 'white', borderRadius: '8px', padding: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-        <div style={{ padding: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="card">
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>Tổng: <strong>{total ?? 0}</strong></div>
           <div>
-            <button disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
-            <button style={{ marginLeft: 8 }} disabled={offset + limit >= (total ?? 0)} onClick={() => setOffset(offset + limit)}>Next</button>
+            <button className="btn btn-ghost" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
+            <button className="btn btn-ghost" style={{ marginLeft: 8 }} disabled={offset + limit >= (total ?? 0)} onClick={() => setOffset(offset + limit)}>Next</button>
           </div>
         </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className="table">
           <thead>
-            <tr style={{ borderBottom: '2px solid #ecf0f1' }}>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Nhân viên</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Ngày</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Check-in</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Check-out</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Giờ làm</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Ca</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Trạng thái</th>
-              <th style={{ padding: '12px', textAlign: 'left' }}>Hành động</th>
+            <tr>
+              <th>Nhân viên</th>
+              <th>Ngày</th>
+              <th>Check-in</th>
+              <th>Check-out</th>
+              <th>Giờ làm</th>
+              <th>Ca</th>
+              <th>Trạng thái</th>
+              <th>Hành động</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(record => (
-              <tr key={record.id} style={{ borderBottom: '1px solid #ecf0f1' }}>
-                <td style={{ padding: '12px' }}>{record.userName}</td>
-                <td style={{ padding: '12px' }}>{record.date}</td>
-                <td style={{ padding: '12px' }}>{record.checkIn || '--'}</td>
-                <td style={{ padding: '12px' }}>{record.checkOut || '--'}</td>
-                <td style={{ padding: '12px' }}>{record.totalHours != null ? `${record.totalHours}h` : '--'}</td>
-                <td style={{ padding: '12px' }}>
-                  <span style={{
-                    padding: '4px 8px',
-                    backgroundColor: record.shift === 'day' ? '#3498db' : '#9b59b6',
-                    color: 'white', borderRadius: '4px', fontSize: '12px'
-                  }}>{record.shift === 'day' ? 'Sáng' : 'Tối'}</span>
+              <tr key={record.id}>
+                <td>{record.userName}</td>
+                <td>{record.date}</td>
+                <td>{record.checkIn || '--'}</td>
+                <td>{record.checkOut || '--'}</td>
+                <td>{record.totalHours != null ? `${record.totalHours}h` : '--'}</td>
+                <td>
+                  <span className={shiftBadgeClass(record.shift)}>{record.shift === 'day' ? 'Sáng' : 'Tối'}</span>
                 </td>
-                <td style={{ padding: '12px' }}>
-                  <span style={{
-                    padding: '4px 8px',
-                    backgroundColor:
-                      record.status === 'late' ? '#e74c3c' :
-                      record.status === 'early' ? '#f39c12' :
-                      record.status === 'working' ? '#16a085' :
-                      record.status === 'normal' ? '#2ecc71' : '#7f8c8d',
-                    color: 'white', borderRadius: '4px', fontSize: '12px'
-                  }}>
+                <td>
+                  <span className={statusBadgeClass(record.status)}>
                     {record.status === 'late' ? 'Trễ' :
                      record.status === 'early' ? 'Về sớm' :
                      record.status === 'working' ? 'Đang làm việc' :
                      record.status === 'normal' ? 'Đúng giờ' : 'Vắng'}
                   </span>
                 </td>
-                <td style={{ padding: '12px' }}>
+                <td>
                   {(record.status === 'late' || record.status === 'early') && (
-                    <button
-                      onClick={() => handleEdit(record.id)}
-                      style={{
-                        padding: '5px 10px',
-                        backgroundColor: '#3498db',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer'
-                      }}
-                    >Chỉnh sửa</button>
+                    <button className="btn btn-primary" onClick={() => handleEdit(record.id)}>Chỉnh sửa</button>
                   )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {loading && <div style={{padding:10}}>Đang tải...</div>}
-        {error && <div style={{padding:10,color:'red'}}>{error}</div>}
+        {loading && <div className="card-body">Đang tải...</div>}
+        {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
       </div>
 
       {editId !== null && (
@@ -179,12 +168,27 @@ export default function AdminAttendance(){
               }}
             />
             <div style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={confirmEdit} style={{ flex: 1, padding: '10px', backgroundColor: '#2ecc71', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Xác nhận</button>
-              <button onClick={() => { setEditId(null); setPinValue(''); }} style={{ flex: 1, padding: '10px', backgroundColor: '#95a5a6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Hủy</button>
+              <button className="btn btn-primary" onClick={confirmEdit} style={{ flex: 1 }}>Xác nhận</button>
+              <button className="btn btn-ghost" onClick={() => { setEditId(null); setPinValue(''); }} style={{ flex: 1 }}>Hủy</button>
             </div>
           </div>
         </div>
       )}
     </AdminLayout>
   );
+}
+
+function statusBadgeClass(s: AttendanceRow['status']): string {
+  const m: Record<AttendanceRow['status'], string> = {
+    late: 'badge badge-danger',
+    early: 'badge badge-warning',
+    working: 'badge badge-success',
+    normal: 'badge badge-info',
+    absent: 'badge'
+  };
+  return m[s] || 'badge';
+}
+
+function shiftBadgeClass(shift: 'day' | 'night'): string {
+  return shift === 'day' ? 'badge badge-info' : 'badge badge-warning';
 }

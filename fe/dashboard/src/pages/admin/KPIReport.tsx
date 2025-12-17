@@ -1,19 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { fetchKPI, KPIItem } from '../../api/kpi';
+import ErrorBanner from '../../components/ErrorBanner';
 
-const inputStyle: React.CSSProperties = { padding: 8, border: '1px solid #ccc', borderRadius: 4, flex: '1 1 200px' };
-const headRow: React.CSSProperties = { borderBottom: '2px solid #ecf0f1', textAlign: 'left' };
-const th: React.CSSProperties = { padding: 10, fontSize: 13, textTransform: 'uppercase', letterSpacing: '.5px', color: '#7f8c8d' };
 const td: React.CSSProperties = { padding: 10, fontSize: 14 };
 
 export default function AdminKPIReport() {
   const [mode, setMode] = useState<'day' | 'month'>('day');
-  const [value, setValue] = useState('2025-01-27');
+  function todayGmt7() {
+    const nowUtc = Date.now();
+    const gmt7 = new Date(nowUtc + 7 * 60 * 60 * 1000);
+    const y = gmt7.getUTCFullYear();
+    const m = String(gmt7.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(gmt7.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  function thisMonthGmt7() {
+    const nowUtc = Date.now();
+    const gmt7 = new Date(nowUtc + 7 * 60 * 60 * 1000);
+    const y = gmt7.getUTCFullYear();
+    const m = String(gmt7.getUTCMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  }
+  const [value, setValue] = useState(todayGmt7());
   const [name, setName] = useState('');
   const [items, setItems] = useState<KPIItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -35,7 +49,7 @@ export default function AdminKPIReport() {
       }
     })();
     return () => { ignore = true; }
-  }, [mode, value, name]);
+  }, [mode, value, name, refresh]);
 
   const avg = (arr: number[]) => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : 0;
 
@@ -43,21 +57,23 @@ export default function AdminKPIReport() {
 
   return (
     <AdminLayout>
-      <h1 style={{ fontSize: 28, marginBottom: 20 }}>KPI Report</h1>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', background: '#fff', padding: 16, borderRadius: 8, marginBottom: 20, alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ marginRight: 8 }}>Chế độ:</label>
-          <select value={mode} onChange={e => setMode(e.target.value as any)} style={{ padding: 8, border: '1px solid #ccc', borderRadius: 4 }}>
-            <option value="day">Theo ngày</option>
-            <option value="month">Theo tháng</option>
-          </select>
+      <h1 style={{ marginBottom: 18 }}>KPI Report</h1>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-body" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <label style={{ marginRight: 8 }}>Chế độ:</label>
+            <select value={mode} onChange={e => { const v = e.target.value as 'day'|'month'; setMode(v); setValue(v === 'day' ? todayGmt7() : thisMonthGmt7()); }}>
+              <option value="day">Theo ngày</option>
+              <option value="month">Theo tháng</option>
+            </select>
+          </div>
+          {mode === 'day' ? (
+            <input type="date" value={value} onChange={e => setValue(e.target.value)} />
+          ) : (
+            <input type="month" value={value} onChange={e => setValue(e.target.value)} />
+          )}
+          <input placeholder="Tên nhân viên" value={name} onChange={e => setName(e.target.value)} />
         </div>
-        {mode === 'day' ? (
-          <input type="date" value={value} onChange={e => setValue(e.target.value)} style={inputStyle} />
-        ) : (
-          <input type="month" value={value} onChange={e => setValue(e.target.value)} style={inputStyle} />
-        )}
-        <input placeholder="Tên nhân viên" value={name} onChange={e => setName(e.target.value)} style={inputStyle} />
       </div>
 
       <div style={{ marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 16 }}>
@@ -67,31 +83,31 @@ export default function AdminKPIReport() {
         <Stat label="Records" value={filtered.length.toString()} color="#e67e22" />
       </div>
 
-      <div style={{ background: '#fff', padding: 16, borderRadius: 8 }}>
-        {loading && <div style={{ padding: 10 }}>Đang tải...</div>}
-        {error && <div style={{ padding: 10, color: 'red' }}>{error}</div>}
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="card">
+        {loading && <div className="card-body">Đang tải...</div>}
+        {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
+        <table className="table">
           <thead>
-            <tr style={headRow}>
-              <th style={th}>Ngày</th>
-              <th style={th}>Nhân viên</th>
-              <th style={th}>Emotion</th>
-              <th style={th}>Attendance</th>
-              <th style={th}>Total</th>
-              <th style={th}>Nhận xét</th>
+            <tr>
+              <th>Ngày</th>
+              <th>Nhân viên</th>
+              <th>Emotion</th>
+              <th>Attendance</th>
+              <th>Total</th>
+              <th>Nhận xét</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(k => (
-              <tr key={k.id} style={{ borderBottom: '1px solid #ecf0f1' }}>
-                <td style={td}>{k.date}</td>
-                <td style={td}>{k.userName}</td>
-                <td style={td}>{k.emotionScore.toFixed(2)}</td>
-                <td style={td}>{k.attendanceScore.toFixed(2)}</td>
-                <td style={td}>
+              <tr key={k.id}>
+                <td>{k.date}</td>
+                <td>{k.userName}</td>
+                <td>{k.emotionScore.toFixed(2)}</td>
+                <td>{k.attendanceScore.toFixed(2)}</td>
+                <td>
                   <strong>{k.totalScore.toFixed(2)}</strong>
                 </td>
-                <td style={td}>{k.remark || '--'}</td>
+                <td>{k.remark || '--'}</td>
               </tr>
             ))}
             {filtered.length === 0 && <tr><td colSpan={6} style={{ padding: 16 }}>Không có dữ liệu</td></tr>}
@@ -104,9 +120,11 @@ export default function AdminKPIReport() {
 
 function Stat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div style={{ background: '#fff', padding: 16, borderRadius: 8, boxShadow: '0 2px 4px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <span style={{ fontSize: 12, letterSpacing: '.5px', textTransform: 'uppercase', color: '#7f8c8d' }}>{label}</span>
-      <span style={{ fontSize: 26, fontWeight: 600, color }}>{value}</span>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="card-body">
+        <span style={{ fontSize: 12, letterSpacing: '.5px', textTransform: 'uppercase', color: '#7f8c8d' }}>{label}</span>
+        <div style={{ fontSize: 26, fontWeight: 600, color }}>{value}</div>
+      </div>
     </div>
   );
 }

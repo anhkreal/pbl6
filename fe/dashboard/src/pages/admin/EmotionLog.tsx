@@ -2,8 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AdminLayout from '../../layouts/AdminLayout';
 import AdminPinModal from '../../components/AdminPinModal';
-import { fetchEmotionLogs, deleteEmotionLog, deleteEmotionById, EmotionLog } from '../../api/emotions';
+import { fetchEmotionLogs, deleteEmotionById, EmotionLog } from '../../api/emotions';
 import { verifyPin } from '../../api/pin';
+import ErrorBanner from '../../components/ErrorBanner';
 
 type AdminEmotionLog = EmotionLog & { note?: string };
 
@@ -31,6 +32,8 @@ export default function EmotionLogPage() {
     );
   }, [logs, filterName, from, to]);
 
+  const [refresh, setRefresh] = useState(0);
+
   useEffect(() => {
     let ignore = false;
     const loadData = async () => {
@@ -54,7 +57,7 @@ export default function EmotionLogPage() {
     };
     loadData();
     return () => { ignore = true; };
-  }, [from, to, filterName, limit, offset]);
+  }, [from, to, filterName, limit, offset, refresh]);
 
   const confirmDelete = async () => {
     if (pendingDelete === null) return;
@@ -83,44 +86,41 @@ export default function EmotionLogPage() {
 
   return (
     <AdminLayout>
-      <h1 style={{ fontSize: 28, marginBottom: 20 }}>Emotion Log</h1>
-      <div style={{ marginBottom: 16, background: '#fff', padding: 16, borderRadius: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <input placeholder="Tên nhân viên" value={filterName} onChange={e => setFilterName(e.target.value)} style={inputStyle} />
-        <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)} style={inputStyle} />
-        <input type="datetime-local" value={to} onChange={e => setTo(e.target.value)} style={inputStyle} />
+      <h1 style={{ marginBottom: 18 }}>Emotion Log</h1>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-body" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <input placeholder="Tên nhân viên" value={filterName} onChange={e => setFilterName(e.target.value)} />
+          <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)} />
+          <input type="datetime-local" value={to} onChange={e => setTo(e.target.value)} />
+        </div>
       </div>
-      <div style={{ background: '#fff', borderRadius: 8, padding: 16 }}>
-        {loading && <div style={{padding:10}}>Đang tải...</div>}
-        {total !== null && <div style={{padding:10}}>Tổng bản ghi: {total}</div>}
-        {error && <div style={{padding:10,color:'red'}}>
-          <div>{error}</div>
-          <div style={{marginTop:8}}>
-            <button onClick={() => { setError(''); setLoading(true); (async()=>{ try { const res = await fetchEmotionLogs({ start_ts: from || undefined, end_ts: to || undefined, staffName: filterName || undefined, emotion_type: 'negative', limit: 30, offset: 0, include_image_base64: false }); setLogs(res.logs || []); } catch(e:any){ setError(e.message||String(e)); } finally { setLoading(false); } })(); }} style={{ padding: '6px 10px', borderRadius:4, border:'1px solid #ccc', background:'#fff', cursor:'pointer' }}>Thử lại</button>
-          </div>
-        </div>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 12 }}>
+      <div className="card">
+        {loading && <div className="card-body">Đang tải...</div>}
+        {total !== null && <div className="card-body">Tổng bản ghi: {total}</div>}
+        {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
           <div>Trang: {total === 0 ? 0 : (Math.floor(offset / limit) + 1)} / {total !== null ? (total === 0 ? 0 : Math.max(1, Math.ceil(total / limit))) : '?'}</div>
         </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className="table">
           <thead>
-            <tr style={headRow}>
-              <th style={th}>ID</th>
-              <th style={th}>Nhân viên</th>
-              <th style={th}>Thời điểm</th>
-              <th style={th}>Cảm xúc</th>
-              <th style={th}>Hình ảnh</th>
-              <th style={th}>Ghi chú</th>
-              <th style={th}>Hành động</th>
+            <tr>
+              <th>ID</th>
+              <th>Nhân viên</th>
+              <th>Thời điểm</th>
+              <th>Cảm xúc</th>
+              <th>Hình ảnh</th>
+              <th>Ghi chú</th>
+              <th>Hành động</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(log => (
-              <tr key={log.id} style={{ borderBottom: '1px solid #ecf0f1' }}>
-                <td style={td}>{log.id}</td>
-                <td style={td}>{log.userName}</td>
-                <td style={td}>{log.timestamp.replace('T',' ').replace('Z','')}</td>
-                <td style={td}><span style={badge(log.emotion)}>{log.emotion}</span></td>
-                <td style={td}>{log.frameImage ? (
+              <tr key={log.id}>
+                <td>{log.id}</td>
+                <td>{log.userName}</td>
+                <td>{log.timestamp.replace('T',' ').replace('Z','')}</td>
+                <td><span className={emotionBadgeClass(log.emotion)}>{log.emotion}</span></td>
+                <td>{log.frameImage ? (
                   <img
                     src={
                       log.frameImage.startsWith('data:image')
@@ -131,8 +131,8 @@ export default function EmotionLogPage() {
                     style={{ width: 48, height: 48, borderRadius: 4, objectFit: 'cover' }}
                   />
                 ) : '--'}</td>
-                <td style={td}>{log.note || '--'}</td>
-                <td style={td}>
+                <td>{log.note || '--'}</td>
+                <td>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
                     <button
                       onClick={(e) => { e.stopPropagation(); setOpenMenuFor(openMenuFor === log.id ? null : log.id); }}
@@ -166,12 +166,14 @@ export default function EmotionLogPage() {
   );
 }
 
-const inputStyle: React.CSSProperties = { padding: 8, border: '1px solid #ccc', borderRadius: 4, flex: '1 1 200px' };
-const headRow: React.CSSProperties = { borderBottom: '2px solid #ecf0f1', textAlign: 'left' };
-const th: React.CSSProperties = { padding: 10, fontSize: 13, textTransform: 'uppercase', letterSpacing: '.5px', color: '#7f8c8d' };
-const td: React.CSSProperties = { padding: 10, fontSize: 14 };
-
-function badge(e: string): React.CSSProperties {
-  const colors: Record<string,string>={angry:'#e74c3c',sad:'#3498db',fear:'#9b59b6',disgust:'#2ecc71',neutral:'#7f8c8d',happy:'#f1c40f'};
-  return {background:colors[e]||'#34495e',color:'#fff',padding:'4px 8px',borderRadius:4,fontSize:12};
+function emotionBadgeClass(e: string): string {
+  const map: Record<string,string> = {
+    angry: 'badge badge-danger',
+    sad: 'badge badge-info',
+    fear: 'badge',
+    disgust: 'badge badge-success',
+    neutral: 'badge',
+    happy: 'badge badge-warning',
+  };
+  return map[e] || 'badge';
 }

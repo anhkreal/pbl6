@@ -84,22 +84,22 @@ export default function StaffProfile() {
       <h1 style={{ marginBottom: 18 }}>Thông tin cá nhân</h1>
       <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))' }}>
         <Section title="Cập nhật thông tin">
-          <input placeholder="Tên" value={name} onChange={e => setName(e.target.value)} style={inp} />
-          <input placeholder="Tuổi" value={age} onChange={e => setAge(e.target.value)} style={inp} />
-          <input placeholder="Nơi ở" value={address} onChange={e => setAddress(e.target.value)} style={inp} />
-          <input placeholder="SĐT" value={phone} onChange={e => setPhone(e.target.value)} style={inp} />
+          <input placeholder="Tên" value={name} onChange={e => setName(e.target.value)} />
+          <input placeholder="Tuổi" value={age} onChange={e => setAge(e.target.value)} />
+          <input placeholder="Nơi ở" value={address} onChange={e => setAddress(e.target.value)} />
+          <input placeholder="SĐT" value={phone} onChange={e => setPhone(e.target.value)} />
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={saveInfo} style={btn}>Lưu</button>
+            <button className="btn btn-primary" onClick={saveInfo}>Lưu</button>
             <div style={{ alignSelf: 'center', color: profileMsg.includes('thành công') ? 'green' : 'red' }}>{profileMsg}</div>
           </div>
         </Section>
 
         <Section title="Đổi mật khẩu">
-          <input type="password" placeholder="Mật khẩu cũ" value={oldPassword} onChange={e => setOldPassword(e.target.value)} style={inp} />
-          <input type="password" placeholder="Mật khẩu mới" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={inp} />
-          <input type="password" placeholder="Xác nhận mật khẩu" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} style={inp} />
+          <input type="password" placeholder="Mật khẩu cũ" value={oldPassword} onChange={e => setOldPassword(e.target.value)} />
+          <input type="password" placeholder="Mật khẩu mới" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+          <input type="password" placeholder="Xác nhận mật khẩu" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={changePwd} style={btn}>Đổi mật khẩu</button>
+            <button className="btn btn-primary" onClick={changePwd}>Đổi mật khẩu</button>
             <div style={{ alignSelf: 'center', color: passwordMsg.includes('thành công') ? 'green' : 'red' }}>{passwordMsg}</div>
           </div>
         </Section>
@@ -112,18 +112,11 @@ export default function StaffProfile() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{
-      background: '#fff', padding: 16, borderRadius: 10,
-      display: 'flex', flexDirection: 'column', gap: 12
-    }}>
-      <h3 style={{ margin: 0 }}>{title}</h3>
-      {children}
+    <div className="card">
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <h3 style={{ margin: 0 }}>{title}</h3>
+        {children}
+      </div>
     </div>
   );
 }
-
-const inp: React.CSSProperties = { padding: 10, border: '1px solid #ccc', borderRadius: 6 };
-const btn: React.CSSProperties = {
-  padding: 12, background: '#3498db', color: '#fff', border: 'none',
-  borderRadius: 6, cursor: 'pointer', fontSize: 14
-};

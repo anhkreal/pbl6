@@ -11,6 +11,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const isActive = (p: string) => loc.pathname === p;
   const links: [string, string][] = [
     ['/admin/dashboard', '📊 Dashboard'],
+    ['/admin/analysis', '📊 Phân tích'],
     ['/admin/emotions', '😊 EmotionLog'],
     ['/admin/attendance', '🗓 Check in/out'],
     ['/admin/kpi', '📈 KPI'],
@@ -18,50 +19,19 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   ];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <header style={top}>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>☕ Cafe Admin</div>
+      <header className="app-header">
+        <div className="app-title">☕ Cafe Admin</div>
         <UserMenu />
       </header>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <aside style={aside}>
+        <aside className="sidebar">
           {links.map(([p, l]) => (
-            <Link
-              key={p}
-              to={p}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 6,
-                fontSize: 14,
-                color: '#fff',
-                background: isActive(p) ? '#2f4858' : 'transparent'
-              }}
-            >
-              {l}
-            </Link>
+            <Link key={p} to={p} className={`nav-link ${isActive(p) ? 'active' : ''}`}>{l}</Link>
           ))}
         </aside>
-        <main style={{ flex: 1, padding: 28, overflowY: 'auto' }}>{children}</main>
+        <main className="content" style={{ flex: 1, overflowY: 'auto' }}>{children}</main>
       </div>
     </div>
   );
 }
 
-const top: React.CSSProperties = {
-  height: 58,
-  background: '#1f2d3a',
-  color: '#fff',
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  padding: '0 24px',
-  borderBottom: '1px solid #16232d'
-};
-const aside: React.CSSProperties = {
-  width: 230,
-  background: '#223240',
-  color: '#fff',
-  padding: '18px 14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6
-};

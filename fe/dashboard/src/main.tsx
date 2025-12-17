@@ -9,11 +9,13 @@ import EmotionLog from './pages/admin/EmotionLog';
 import Attendance from './pages/admin/Attendance';
 import KPIReport from './pages/admin/KPIReport';
 import AdminProfile from './pages/admin/Profile';
+import AdminAnalysis from './pages/admin/Analysis';
 import StaffDashboard from './pages/staff/Dashboard';
 import StaffEmotionLog from './pages/staff/EmotionLog';
 import StaffAttendance from './pages/staff/Attendance';
 import StaffKPIReport from './pages/staff/KPIReport';
 import StaffProfile from './pages/staff/Profile';
+import StaffAnalysis from './pages/staff/Analysis';
 import ImageUpdate from './pages/staff/ImageUpdate';
 import Contact from './pages/staff/Contact';
 import EmployeeDetail from './pages/admin/EmployeeDetail';
@@ -31,12 +33,14 @@ function App() {
         <Route path="/admin/employeedetail" element={<EmployeeDetail />} />
         <Route path="/admin/attendance" element={<Attendance />} />
         <Route path="/admin/kpi" element={<KPIReport />} />
+        <Route path="/admin/analysis" element={<AdminAnalysis />} />
         <Route path="/admin/profile" element={<AdminProfile />} />
         {/* Staff */}
         <Route path="/staff/dashboard" element={<StaffDashboard />} />
         <Route path="/staff/emotions" element={<StaffEmotionLog />} />
         <Route path="/staff/attendance" element={<StaffAttendance />} />
         <Route path="/staff/kpi" element={<StaffKPIReport />} />
+        <Route path="/staff/analysis" element={<StaffAnalysis />} />
         <Route path="/staff/profile" element={<StaffProfile />} />
         <Route path="/staff/image-update" element={<ImageUpdate />} />
         <Route path="/staff/contact" element={<Contact />} />

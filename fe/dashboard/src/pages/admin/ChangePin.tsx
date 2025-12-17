@@ -19,18 +19,15 @@ export default function ChangePinPage() {
 
   return (
     <AdminLayout>
-      <h1 style={{ fontSize: 28, marginBottom: 20 }}>Thay đổi mã PIN</h1>
-      <form onSubmit={submit} style={{
-        background: '#fff', padding: 24, borderRadius: 8, maxWidth: 400,
-        display: 'flex', flexDirection: 'column', gap: 14
-      }}>
+      <h1 style={{ marginBottom: 20 }}>Thay đổi mã PIN</h1>
+      <form onSubmit={submit} className="card" style={{ maxWidth: 400 }}>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <input
           type="password"
           placeholder="Mã PIN cũ"
           value={oldPin}
           onChange={e => setOldPin(e.target.value)}
           maxLength={6}
-          style={input}
           required
         />
         <input
@@ -39,7 +36,6 @@ export default function ChangePinPage() {
           value={newPin}
           onChange={e => setNewPin(e.target.value)}
           maxLength={6}
-          style={input}
           required
         />
         <input
@@ -48,18 +44,13 @@ export default function ChangePinPage() {
           value={confirmPin}
           onChange={e => setConfirmPin(e.target.value)}
           maxLength={6}
-          style={input}
           required
         />
         {message && <div style={{ color: message.includes('thành công') ? '#16a085' : '#e74c3c', fontSize: 14 }}>{message}</div>}
-        <button type="submit" style={btn}>Lưu thay đổi</button>
+        <button type="submit" className="btn btn-primary">Lưu thay đổi</button>
+        </div>
       </form>
     </AdminLayout>
   );
 }
 
-const input: React.CSSProperties = { padding: 10, border: '1px solid #ccc', borderRadius: 4 };
-const btn: React.CSSProperties = {
-  padding: 12, background: '#3498db', color: '#fff', border: 'none',
-  borderRadius: 4, cursor: 'pointer', fontSize: 16
-};

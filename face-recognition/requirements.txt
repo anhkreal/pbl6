@@ -1,31 +1,35 @@
-# Face Recognition API - Backend Only
+# Face Recognition API - Server Runtime (Windows-friendly)
 
 # Core Framework
-fastapi>=0.104.0
+fastapi>=0.124.0
 uvicorn[standard]>=0.24.0
 
 # Computer Vision & AI
+# Pin numpy to a range compatible with latest OpenCV wheels on Windows
+numpy>=2.2.0,<2.3.0
 opencv-python>=4.8.0
-numpy>=1.24.0,<2.0.0
-torch>=2.0.0
-torchvision>=0.15.0
+torch>=2.9.0
+torchvision>=0.24.0
 Pillow>=10.0.0
 
 # FAISS Vector Search
-faiss-cpu>=1.7.4
-
-# Anti-spoofing & Face Analysis
-deepface>=0.0.93
-tensorflow>=2.15.0,<2.16.0
+faiss-cpu>=1.13.1
 
 # Database
 pymysql>=1.1.0
 
-# File Handling  
+# File Handling
 python-multipart>=0.0.6
 
-# Config & Validation
-pydantic>=1.10.0,<2.0.0
+# Config & Validation (FastAPI v2 ecosystem)
+pydantic>=2.6.0
 
-# Additional utilities
+# Networking & Utilities
 requests>=2.31.0
+httpx>=0.28.0
+pandas>=2.2.0
+
+# Optional: DeepFace stack (requires Python 3.10 and TensorFlow wheels)
+# If you need DeepFace + TensorFlow, use a Python 3.10 venv and then install:
+# tensorflow==2.15.0
+# deepface==0.0.96

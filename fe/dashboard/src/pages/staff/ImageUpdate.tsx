@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
 import StaffLayout from '../../layouts/StaffLayout';
+import ErrorBanner from '../../components/ErrorBanner';
 import { apiFetch } from '../../api/http';
 import { buildUrl } from '../../api/base';
 declare global {
@@ -22,6 +23,11 @@ const POSITIONS = [
   { key: 'down', label: 'Nhìn xuống' },
 ];
 
+const LABEL_BY_KEY: Record<string, string> = POSITIONS.reduce((acc, p) => {
+  acc[p.key] = p.label;
+  return acc;
+}, {} as Record<string, string>);
+
 export default function ImageUpdate() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -31,6 +37,41 @@ export default function ImageUpdate() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [mockUploading, setMockUploading] = useState(false);
   const [modelLoaded, setModelLoaded] = useState(false);
+  const [facesLoading, setFacesLoading] = useState(false);
+  const [facesError, setFacesError] = useState('');
+  const [existingFaces, setExistingFaces] = useState<string[]>([]);
+
+  function getSessionUserId(): number | null {
+    try {
+      const raw = sessionStorage.getItem('userId');
+      if (!raw) return null;
+      const n = Number(raw);
+      return Number.isNaN(n) ? null : n;
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadExistingFaces() {
+    const userId = getSessionUserId();
+    if (!userId) { setExistingFaces([]); return; }
+    setFacesLoading(true); setFacesError('');
+    try {
+      const res: any = await apiFetch(`/faces/${userId}?include_image_base64=true`);
+      const arr: any[] = Array.isArray(res?.faces) ? res.faces : [];
+      const imgs = arr
+        .map((f: any) => (f?.image_base64 || f?.image || '').toString().trim())
+        .filter((s: string) => !!s)
+        .map((s: string) => (s.startsWith('data:image') || s.startsWith('http')) ? s : `data:image/jpeg;base64,${s}`)
+        .slice(0, 10);
+      setExistingFaces(imgs);
+    } catch (e: any) {
+      setFacesError(e?.message || 'Không tải được danh sách ảnh');
+      setExistingFaces([]);
+    } finally {
+      setFacesLoading(false);
+    }
+  }
 
   useEffect(() => {
     // Load face-api.js models song song, khi xong thì setModelLoaded(true)
@@ -59,6 +100,11 @@ export default function ImageUpdate() {
     };
   }, []);
 
+  // Load existing faces once on mount
+  useEffect(() => {
+    loadExistingFaces();
+  }, []);
+
   useEffect(() => {
     if (countdown === null) return;
     if (countdown === 0) {
@@ -83,6 +129,104 @@ export default function ImageUpdate() {
     const ctx = c.getContext('2d')!;
     ctx.drawImage(v, 0, 0, c.width, c.height);
 
+    // Helper: decorate cropped face with border + label (similar to Python overlay)
+    function decorateFaceCanvas(faceCanvas: HTMLCanvasElement, label: string) {
+      const ctx2 = faceCanvas.getContext('2d');
+      if (!ctx2) return;
+      const w = faceCanvas.width;
+      const h = faceCanvas.height;
+      ctx2.save();
+      // Border: green like recognized rectangle
+      ctx2.lineWidth = Math.max(2, Math.floor(Math.min(w, h) * 0.02));
+      ctx2.strokeStyle = '#00C853';
+      ctx2.strokeRect(1, 1, w - 2, h - 2);
+      // Label background + text (top-left)
+      const padX = 6;
+      const padY = 4;
+      const fontSize = Math.max(10, Math.floor(Math.min(w, h) * 0.08));
+      ctx2.font = `${fontSize}px sans-serif`;
+      const metrics = ctx2.measureText(label);
+      const textW = metrics.width;
+      const textH = fontSize; // approximate height
+      ctx2.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx2.fillRect(0, 0, textW + padX * 2, textH + padY * 2);
+      ctx2.fillStyle = '#FFFFFF';
+      ctx2.textBaseline = 'top';
+      ctx2.fillText(label, padX, padY);
+      ctx2.restore();
+    }
+
+    // Helper: create a padded gray canvas with the face centered
+    function createPaddedCanvas(srcCanvas: HTMLCanvasElement) {
+      const pad = Math.round(
+        Math.max(8, Math.min(32, Math.min(srcCanvas.width, srcCanvas.height) * 0.08))
+      );
+      const out = document.createElement('canvas');
+      out.width = srcCanvas.width + pad * 2;
+      out.height = srcCanvas.height + pad * 2;
+      const octx = out.getContext('2d')!;
+      // Fill gray background similar to Python UI
+      octx.fillStyle = '#BDBDBD';
+      octx.fillRect(0, 0, out.width, out.height);
+      // Draw original face centered with padding margin
+      octx.drawImage(srcCanvas, pad, pad);
+      return out;
+    }
+
+    // Helper: classify pose into 10 categories using face landmarks
+    async function classifyPoseFromCanvas(canvasEl: HTMLCanvasElement): Promise<string | null> {
+      try {
+        const det = await faceapi
+          .detectSingleFace(canvasEl, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.2 }))
+          .withFaceLandmarks();
+        if (!det || !det.landmarks) return null;
+        const lm = det.landmarks;
+        const pts = lm.positions as { x: number; y: number }[];
+        const leftEyeIdx = [36, 37, 38, 39, 40, 41];
+        const rightEyeIdx = [42, 43, 44, 45, 46, 47];
+        const chinIdx = 8;
+        const noseTipIdx = 30;
+        function avg(indexes: number[]) {
+          let sx = 0, sy = 0;
+          indexes.forEach(i => { sx += pts[i].x; sy += pts[i].y; });
+          return { x: sx / indexes.length, y: sy / indexes.length };
+        }
+        const leftEye = avg(leftEyeIdx);
+        const rightEye = avg(rightEyeIdx);
+        const eyeMid = { x: (leftEye.x + rightEye.x) / 2, y: (leftEye.y + rightEye.y) / 2 };
+        const interEye = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y) || 1;
+        const nose = pts[noseTipIdx];
+        const chin = pts[chinIdx];
+        const yaw = (nose.x - eyeMid.x) / interEye; // left(-) right(+)
+        const pitchRatio = (nose.y - eyeMid.y) / Math.max(1, (chin.y - eyeMid.y)); // up(small) down(large)
+        // const rollRad = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
+        // const rollDeg = (rollRad * 180) / Math.PI;
+
+        const YAW_SIDE = 0.18;
+        const YAW_WEAK = 0.08;
+        const PITCH_UP = 0.45;
+        const PITCH_DOWN = 0.65;
+
+        if (Math.abs(yaw) < YAW_WEAK) {
+          if (pitchRatio < PITCH_UP) return 'up';
+          if (pitchRatio > PITCH_DOWN) return 'down';
+          if (!images['frontal1']) return 'frontal1';
+          if (!images['frontal2']) return 'frontal2';
+          return 'frontal1';
+        }
+        const side = yaw > 0 ? 'right' : 'left';
+        if (Math.abs(yaw) >= YAW_SIDE) {
+          if (pitchRatio < PITCH_UP) return `${side}_top`;
+          if (pitchRatio > PITCH_DOWN) return `${side}_bottom`;
+          return side;
+        }
+        // weak side turn
+        return side;
+      } catch (e) {
+        return null;
+      }
+    }
+
     // Detect face bằng Haar Cascade qua opencv.js
     if (window.cv && window.cv.CascadeClassifier) {
       // Đọc ảnh từ canvas
@@ -102,16 +246,26 @@ export default function ImageUpdate() {
       const face = faces.get(0);
       // Crop khuôn mặt
       const cropped = src.roi(face);
-      // Tạo canvas tạm để xuất ảnh
+      // Tạo canvas tạm để xuất ảnh (face-only), sau đó bọc padding xám
       const faceCanvas = document.createElement('canvas');
       faceCanvas.width = face.width;
       faceCanvas.height = face.height;
       window.cv.imshow(faceCanvas, cropped);
-      const data = faceCanvas.toDataURL('image/jpeg', 0.95);
+      const paddedCanvas = createPaddedCanvas(faceCanvas);
+      // Detect pose and decorate label accordingly (on padded canvas)
+      const detectedKey = await classifyPoseFromCanvas(paddedCanvas);
+      const chosenKey = detectedKey && !images[detectedKey] ? detectedKey : POSITIONS[currentIdx].key;
+      const posLabel = LABEL_BY_KEY[chosenKey] || POSITIONS[currentIdx].label;
+      decorateFaceCanvas(paddedCanvas, posLabel);
+      const data = paddedCanvas.toDataURL('image/jpeg', 0.95);
       src.delete(); gray.delete(); faces.delete(); faceCascade.delete(); cropped.delete();
-      const pos = POSITIONS[currentIdx].key;
-      setImages(prev => ({ ...prev, [pos]: data }));
-      setCurrentIdx(i => Math.min(i + 1, POSITIONS.length - 1));
+      const pos = chosenKey;
+      setImages(prev => {
+        const next = { ...prev, [pos]: data };
+        const nextIdx = POSITIONS.findIndex(p => !next[p.key]);
+        setCurrentIdx(nextIdx >= 0 ? nextIdx : currentIdx);
+        return next;
+      });
       return;
     }
     // Nếu không có opencv.js, fallback về face-api.js
@@ -133,11 +287,21 @@ export default function ImageUpdate() {
     faceCanvas.height = h;
     const faceCtx = faceCanvas.getContext('2d')!;
     faceCtx.drawImage(c, x, y, w, h, 0, 0, w, h);
-    const data = faceCanvas.toDataURL('image/jpeg', 0.95);
+    const paddedCanvas = createPaddedCanvas(faceCanvas);
+    // Detect pose and decorate label accordingly
+    const detectedKey = await classifyPoseFromCanvas(paddedCanvas);
+    const chosenKey = detectedKey && !images[detectedKey] ? detectedKey : POSITIONS[currentIdx].key;
+    const posLabel = LABEL_BY_KEY[chosenKey] || POSITIONS[currentIdx].label;
+    decorateFaceCanvas(paddedCanvas, posLabel);
+    const data = paddedCanvas.toDataURL('image/jpeg', 0.95);
 
-    const pos = POSITIONS[currentIdx].key;
-    setImages(prev => ({ ...prev, [pos]: data }));
-    setCurrentIdx(i => Math.min(i + 1, POSITIONS.length - 1));
+    const pos = chosenKey;
+    setImages(prev => {
+      const next = { ...prev, [pos]: data };
+      const nextIdx = POSITIONS.findIndex(p => !next[p.key]);
+      setCurrentIdx(nextIdx >= 0 ? nextIdx : currentIdx);
+      return next;
+    });
   }
 
   function startAuto() { setCountdown(3); }
@@ -233,17 +397,37 @@ export default function ImageUpdate() {
             <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
           <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button onClick={() => doCapture()} style={{ padding: '8px 12px' }} disabled={!modelLoaded}>Chụp</button>
-            <button onClick={startAuto} style={{ padding: '8px 12px' }} disabled={!modelLoaded}>Auto (3s)</button>
+            <button className="btn btn-primary" onClick={() => doCapture()} disabled={!modelLoaded}>Chụp</button>
+            <button className="btn btn-ghost" onClick={startAuto} disabled={!modelLoaded}>Auto (3s)</button>
               {!modelLoaded && <div style={{color:'red',marginTop:8}}>Đang tải model nhận diện khuôn mặt...</div>}
             <div style={{ marginLeft: 12 }}>Progress: {Object.keys(images).length}/{POSITIONS.length}</div>
-            <button onClick={mockUpload} disabled={mockUploading || Object.keys(images).length < POSITIONS.length} style={{ marginLeft: 12, padding: '8px 12px' }}>{mockUploading ? 'Uploading...' : 'Mock Upload'}</button>
+            <button className="btn btn-primary" onClick={mockUpload} disabled={mockUploading || Object.keys(images).length < POSITIONS.length} style={{ marginLeft: 12 }}>{mockUploading ? 'Uploading...' : 'Mock Upload'}</button>
             {countdown !== null && <div style={{ marginLeft: 12, fontWeight: 700 }}>Đếm ngược: {countdown}</div>}
           </div>
           <canvas ref={canvasRef} style={{ display: 'none' }} />
         </div>
 
-        <div style={{ width: 340 }}>
+        <div style={{ width: 360 }}>
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div className="card-body">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div style={{ fontWeight: 700 }}>Ảnh đã lưu ({existingFaces.length})</div>
+                <button className="btn btn-ghost" onClick={loadExistingFaces} disabled={facesLoading}>Làm mới</button>
+              </div>
+              {facesError && <div style={{ marginBottom: 8 }}><ErrorBanner message={facesError} onRetry={loadExistingFaces} /></div>}
+              {facesLoading && <div>Đang tải ảnh...</div>}
+              {!facesLoading && existingFaces.length === 0 && <div>Chưa có ảnh lưu cho tài khoản này.</div>}
+              {!facesLoading && existingFaces.length > 0 && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                  {existingFaces.slice(0, 10).map((src, idx) => (
+                    <div key={idx} style={{ width: 64, height: 64, borderRadius: 6, overflow: 'hidden', background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <img src={src} alt={`face-${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <ol style={{ paddingLeft: 12 }}>
             {POSITIONS.map((p, idx) => (
               <li key={p.key} style={{ padding: 8, background: idx === currentIdx ? '#eef' : undefined, marginBottom: 6, borderRadius: 6 }}>
@@ -267,7 +451,7 @@ export default function ImageUpdate() {
                       </div>
                     </>}
                     <div style={{ marginTop: 6 }}>
-                      <button onClick={() => retake(p.key)} disabled={!images[p.key]}>Retake</button>
+                      <button className="btn btn-ghost" onClick={() => retake(p.key)} disabled={!images[p.key]}>Retake</button>
                       <label style={{ marginLeft: 8 }}>
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleUpload(p.key, e)} />
                         <span style={{ cursor: 'pointer', color: '#1976d2', textDecoration: 'underline' }}>Upload</span>

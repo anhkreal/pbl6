@@ -7,6 +7,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 interface NavItem { label: string; path: string; roles: ('admin'|'staff')[] }
 const NAV: NavItem[] = [
   { label:'Dashboard', path:'dashboard', roles:['admin','staff'] },
+  { label:'Phân tích', path:'analysis', roles:['admin','staff'] },
   { label:'EmotionLog', path:'emotions', roles:['admin','staff'] },
   { label:'Attendance', path:'attendance', roles:['admin','staff'] },
   { label:'KPI Report', path:'kpi', roles:['admin','staff'] },
@@ -23,7 +24,10 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   const loc = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const { openPin } = useUIStore();
-  function go(p: string){ nav('/'+p); }
+  function go(p: string){
+    const prefix = role === 'admin' ? '/admin/' : '/staff/';
+    nav(prefix + p);
+  }
   return (
     <div style={{display:'flex', height:'100vh', fontFamily:'Arial'}}>
       <aside style={{width:220, background:'#222', color:'#eee', padding:12}}>

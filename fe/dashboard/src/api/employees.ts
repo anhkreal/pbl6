@@ -105,17 +105,21 @@ export async function fetchEmployees(query?: string | number): Promise<Employee[
 }
 
 export async function createEmployee(data: { fullName: string; username: string; password: string; age: number; address: string; phone: string; shift: 'day' | 'night' }): Promise<Employee> {
-  return apiFetch<Employee>('/employees', { method: 'POST', body: JSON.stringify(data) });
+  // Deprecated: backend has no /employees endpoint. Use /add-user-account (form) instead via addUserAndAccount().
+  throw new Error('Deprecated API: use addUserAndAccount()');
 }
 
 export async function shiftEmployee(id: number): Promise<void> {
-  await apiFetch(`/employees/${id}/shift`, { method: 'POST' });
+  // Deprecated: use shiftEmployeeByUsername().
+  throw new Error('Deprecated API: use shiftEmployeeByUsername()');
 }
 
 export async function resetEmployee(id: number): Promise<void> {
-  await apiFetch(`/employees/${id}/reset`, { method: 'POST' });
+  // Deprecated: backend endpoint does not exist.
+  throw new Error('Deprecated API: endpoint not available');
 }
 
 export async function deleteEmployee(id: number): Promise<void> {
-  await apiFetch(`/employees/${id}`, { method: 'DELETE' });
+  // Deprecated: use resignEmployeeByUsername().
+  throw new Error('Deprecated API: use resignEmployeeByUsername()');
 }
