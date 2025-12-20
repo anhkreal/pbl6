@@ -129,7 +129,7 @@ export default function ImageUpdate() {
     const ctx = c.getContext('2d')!;
     ctx.drawImage(v, 0, 0, c.width, c.height);
 
-    // Helper: decorate cropped face with border + label (similar to Python overlay)
+    // Helper: decorate cropped face with border only (no label text on top-left corner)
     function decorateFaceCanvas(faceCanvas: HTMLCanvasElement, label: string) {
       const ctx2 = faceCanvas.getContext('2d');
       if (!ctx2) return;
@@ -140,19 +140,7 @@ export default function ImageUpdate() {
       ctx2.lineWidth = Math.max(2, Math.floor(Math.min(w, h) * 0.02));
       ctx2.strokeStyle = '#00C853';
       ctx2.strokeRect(1, 1, w - 2, h - 2);
-      // Label background + text (top-left)
-      const padX = 6;
-      const padY = 4;
-      const fontSize = Math.max(10, Math.floor(Math.min(w, h) * 0.08));
-      ctx2.font = `${fontSize}px sans-serif`;
-      const metrics = ctx2.measureText(label);
-      const textW = metrics.width;
-      const textH = fontSize; // approximate height
-      ctx2.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx2.fillRect(0, 0, textW + padX * 2, textH + padY * 2);
-      ctx2.fillStyle = '#FFFFFF';
-      ctx2.textBaseline = 'top';
-      ctx2.fillText(label, padX, padY);
+      // ✅ Loại bỏ text label - chỉ giữ khung hình
       ctx2.restore();
     }
 
@@ -184,6 +172,87 @@ export default function ImageUpdate() {
       octx.imageSmoothingQuality = 'high';
       octx.drawImage(square, 0, 0, targetSize, targetSize);
       return out;
+    }
+
+    // Helper: crop face tightly using face landmarks (exclude hair and cheek margins)
+    // Uses 68 landmarks: jaw (0..16), chin (8), eyebrows (17..26)
+    async function cropTightFaceByLandmarks(srcCanvas: HTMLCanvasElement): Promise<HTMLCanvasElement | null> {
+      try {
+        const det = await faceapi
+          .detectSingleFace(srcCanvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.2 }))
+          .withFaceLandmarks();
+        if (!det || !det.landmarks) return null;
+        const pts = det.landmarks.positions as { x: number; y: number }[];
+
+        // Bounds derived from landmarks
+        const leftJaw = pts[3].x;   // near cheek
+        const rightJaw = pts[13].x; // near cheek
+        const chinY = pts[8].y;     // chin
+        const eyebrowIdx = [17,18,19,20,21,22,23,24,25,26];
+        const topEyebrowY = Math.min(...eyebrowIdx.map(i => pts[i].y));
+        // Small inward padding to avoid cutting into skin too much
+        const padX = Math.floor(Math.min(srcCanvas.width, srcCanvas.height) * 0.01);
+        const padTop = Math.floor(Math.min(srcCanvas.width, srcCanvas.height) * 0.02);
+
+        let x = Math.max(0, Math.floor(leftJaw) + padX);
+        let y = Math.max(0, Math.floor(topEyebrowY) - padTop);
+        let w = Math.max(1, Math.floor(rightJaw) - Math.floor(leftJaw) - padX * 2);
+        let h = Math.max(1, Math.floor(chinY) - y);
+
+        // Expand rectangle by ~5% to relax tight crop slightly, as requested
+        const expandPerc = 0.05;
+        const expX = Math.floor(w * expandPerc);
+        const expY = Math.floor(h * expandPerc);
+        x = Math.max(0, x - expX);
+        y = Math.max(0, y - expY);
+        w = Math.min(srcCanvas.width - x, w + expX * 2);
+        h = Math.min(srcCanvas.height - y, h + expY * 2);
+
+        // Enforce square crop by expanding the smaller dimension
+        const side = Math.max(w, h);
+        // Expand width horizontally if needed
+        if (w < side) {
+          const need = side - w;
+          const half = need / 2;
+          let nx = x - half;
+          if (nx < 0) nx = 0;
+          let nw = Math.min(side, srcCanvas.width - nx);
+          // If hitting right bound, try shifting left to keep width
+          if (nw < side && nx > 0) {
+            const shift = Math.min(nx, side - nw);
+            nx -= shift;
+            nw = Math.min(side, srcCanvas.width - nx);
+          }
+          x = nx;
+          w = nw;
+        }
+        // Expand height vertically if needed
+        if (h < side) {
+          const need = side - h;
+          const half = need / 2;
+          let ny = y - half;
+          if (ny < 0) ny = 0;
+          let nh = Math.min(side, srcCanvas.height - ny);
+          if (nh < side && ny > 0) {
+            const shift = Math.min(ny, side - nh);
+            ny -= shift;
+            nh = Math.min(side, srcCanvas.height - ny);
+          }
+          y = ny;
+          h = nh;
+        }
+
+        // Create output canvas
+        const out = document.createElement('canvas');
+        const squareSide = Math.round(Math.max(w, h));
+        out.width = squareSide;
+        out.height = squareSide;
+        const octx = out.getContext('2d')!;
+        octx.drawImage(srcCanvas, Math.round(x), Math.round(y), squareSide, squareSide, 0, 0, squareSide, squareSide);
+        return out;
+      } catch {
+        return null;
+      }
     }
 
     // Helper: classify pose into 10 categories using face landmarks
@@ -257,14 +326,35 @@ export default function ImageUpdate() {
         return;
       }
       const face = faces.get(0);
-      // Crop khuôn mặt
+      // Crop khuôn mặt (Haar) → canvas
       const cropped = src.roi(face);
-      // Tạo canvas tạm để xuất ảnh (face-only), sau đó bọc padding xám
-      const faceCanvas = document.createElement('canvas');
-      faceCanvas.width = face.width;
-      faceCanvas.height = face.height;
-      window.cv.imshow(faceCanvas, cropped);
-      const paddedCanvas = createPaddedCanvas(faceCanvas);
+      const fullFaceCanvas = document.createElement('canvas');
+      fullFaceCanvas.width = face.width;
+      fullFaceCanvas.height = face.height;
+      window.cv.imshow(fullFaceCanvas, cropped);
+      // Landmark-based tight crop; fallback to 15% inward crop
+      const tight = await cropTightFaceByLandmarks(fullFaceCanvas);
+      const faceCanvas = tight || (function() {
+        const cropMargin = Math.floor(Math.min(fullFaceCanvas.width, fullFaceCanvas.height) * 0.10);
+        const srcW0 = Math.max(1, fullFaceCanvas.width - cropMargin * 2);
+        const srcH0 = Math.max(1, fullFaceCanvas.height - cropMargin * 2);
+        const side = Math.max(srcW0, srcH0);
+        // Center square source rect
+        let srcX = cropMargin - Math.floor((side - srcW0) / 2);
+        let srcY = cropMargin - Math.floor((side - srcH0) / 2);
+        if (srcX < 0) srcX = 0;
+        if (srcY < 0) srcY = 0;
+        if (srcX + side > fullFaceCanvas.width) srcX = Math.max(0, fullFaceCanvas.width - side);
+        if (srcY + side > fullFaceCanvas.height) srcY = Math.max(0, fullFaceCanvas.height - side);
+        const fc = document.createElement('canvas');
+        fc.width = side;
+        fc.height = side;
+        const fctx = fc.getContext('2d')!;
+        fctx.drawImage(fullFaceCanvas, srcX, srcY, side, side, 0, 0, side, side);
+        return fc;
+      })();
+      // Keep gray padding at 0.5
+      const paddedCanvas = createPaddedCanvas(faceCanvas, 512, 0.5);
       // Detect pose and decorate label accordingly (on padded canvas)
       const detectedKey = await classifyPoseFromCanvas(paddedCanvas);
       const chosenKey = detectedKey && !images[detectedKey] ? detectedKey : POSITIONS[currentIdx].key;
@@ -288,19 +378,38 @@ export default function ImageUpdate() {
       alert('Không phát hiện được khuôn mặt. Vui lòng thử lại!\nHãy đảm bảo mặt rõ, đủ sáng, chiếm phần lớn khung hình.');
       return;
     }
-    // Crop theo bounding box khuôn mặt (TinyFaceDetector)
+    // Initial ROI from detector
     const box = detections.detection.box;
-    const pad = 0;
-    const x = Math.max(0, box.x - pad);
-    const y = Math.max(0, box.y - pad);
-    const w = Math.min(c.width - x, box.width + pad * 2);
-    const h = Math.min(c.height - y, box.height + pad * 2);
-    const faceCanvas = document.createElement('canvas');
-    faceCanvas.width = w;
-    faceCanvas.height = h;
-    const faceCtx = faceCanvas.getContext('2d')!;
-    faceCtx.drawImage(c, x, y, w, h, 0, 0, w, h);
-    const paddedCanvas = createPaddedCanvas(faceCanvas);
+    const x = Math.max(0, box.x);
+    const y = Math.max(0, box.y);
+    const w = Math.min(c.width - x, box.width);
+    const h = Math.min(c.height - y, box.height);
+    const roiCanvas = document.createElement('canvas');
+    roiCanvas.width = w;
+    roiCanvas.height = h;
+    const roiCtx = roiCanvas.getContext('2d')!;
+    roiCtx.drawImage(c, x, y, w, h, 0, 0, w, h);
+    // Tighten using landmarks; fallback: 15% inward crop
+    const tight2 = await cropTightFaceByLandmarks(roiCanvas);
+    const faceCanvas = tight2 || (function() {
+      const cropMargin = Math.floor(Math.min(roiCanvas.width, roiCanvas.height) * 0.10);
+      const srcW0 = Math.max(1, roiCanvas.width - cropMargin * 2);
+      const srcH0 = Math.max(1, roiCanvas.height - cropMargin * 2);
+      const side = Math.max(srcW0, srcH0);
+      let srcX = cropMargin - Math.floor((side - srcW0) / 2);
+      let srcY = cropMargin - Math.floor((side - srcH0) / 2);
+      if (srcX < 0) srcX = 0;
+      if (srcY < 0) srcY = 0;
+      if (srcX + side > roiCanvas.width) srcX = Math.max(0, roiCanvas.width - side);
+      if (srcY + side > roiCanvas.height) srcY = Math.max(0, roiCanvas.height - side);
+      const fc = document.createElement('canvas');
+      fc.width = side;
+      fc.height = side;
+      const fctx = fc.getContext('2d')!;
+      fctx.drawImage(roiCanvas, srcX, srcY, side, side, 0, 0, side, side);
+      return fc;
+    })();
+    const paddedCanvas = createPaddedCanvas(faceCanvas, 512, 0.5);
     // Detect pose and decorate label accordingly
     const detectedKey = await classifyPoseFromCanvas(paddedCanvas);
     const chosenKey = detectedKey && !images[detectedKey] ? detectedKey : POSITIONS[currentIdx].key;
@@ -323,6 +432,12 @@ export default function ImageUpdate() {
     const idx = POSITIONS.findIndex(p => p.key === posKey);
     if (idx >= 0) setCurrentIdx(idx);
     setImages(prev => { const n = { ...prev }; delete n[posKey]; return n; });
+  }
+
+  function resetTempImages() {
+    setImages({});
+    setCurrentIdx(0);
+    setCountdown(null);
   }
 
   function handleUpload(posKey: string, e: React.ChangeEvent<HTMLInputElement>) {
@@ -415,6 +530,7 @@ export default function ImageUpdate() {
               {!modelLoaded && <div style={{color:'red',marginTop:8}}>Đang tải model nhận diện khuôn mặt...</div>}
             <div style={{ marginLeft: 12 }}>Progress: {Object.keys(images).length}/{POSITIONS.length}</div>
             <button className="btn btn-primary" onClick={mockUpload} disabled={mockUploading || Object.keys(images).length < POSITIONS.length} style={{ marginLeft: 12 }}>{mockUploading ? 'Uploading...' : 'Mock Upload'}</button>
+            <button className="btn btn-ghost" onClick={resetTempImages} style={{ marginLeft: 8 }}>Reset ảnh tạm</button>
             {countdown !== null && <div style={{ marginLeft: 12, fontWeight: 700 }}>Đếm ngược: {countdown}</div>}
           </div>
           <canvas ref={canvasRef} style={{ display: 'none' }} />

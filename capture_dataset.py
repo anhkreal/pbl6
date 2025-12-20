@@ -125,21 +125,26 @@ def select_camera():
             print("❌ Vui lòng nhập số!")
 
 # ========== CHUẨN HÓA ẢNH ==========
-def prepare_face_image(face_img, target_size=512, margin_percent=0.5):
+def prepare_face_image(face_img, target_size=512, margin_percent=0.2):
     """
-    Chuẩn hóa ảnh khuôn mặt giống như raspberry_face_app.py
+    Chuẩn hóa ảnh khuôn mặt với crop sát mặt hơn
+    
+    Args:
+        face_img: Ảnh khuôn mặt crop từ camera
+        target_size: Kích thước output (mặc định 512x512)
+        margin_percent: Phần trăm margin quanh mặt (0.2 = crop sát mặt hơn, cũ là 0.5)
     """
     try:
         h, w = face_img.shape[:2]
         
-        # Tính margin
+        # Tính margin (giảm xuống để crop sát mặt hơn)
         margin_w = int(w * margin_percent)
         margin_h = int(h * margin_percent)
         
-        # Tạo canvas vuông với margin
+        # Tạo canvas vuông với margin sát
         canvas_size = max(w, h) + max(margin_w, margin_h) * 2
         canvas = np.zeros((canvas_size, canvas_size, 3), dtype=np.uint8)
-        canvas.fill(114)
+        canvas.fill(114)  # Màu nền xám
         
         # Đặt ảnh vào giữa canvas
         start_x = (canvas_size - w) // 2
@@ -265,8 +270,9 @@ def main():
                 quality = "TOO SMALL"
             
             cv2.rectangle(display_frame, (x, y), (x+w, y+h), color, 3)
-            cv2.putText(display_frame, f"{quality} ({w}x{h})", 
-                       (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            # Chỉ vẽ text chất lượng ở dưới khung, loại bỏ text ở góc trái trên
+            cv2.putText(display_frame, quality, 
+                       (x, y+h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         
         # Hiển thị thông tin
         info_y = 30

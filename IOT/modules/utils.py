@@ -59,8 +59,14 @@ def put_vn_text(img, text, pos, font_size=22, color=(255, 255, 0)):
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 # ========== CHUẨN HÓA ẢNH ==========
-def prepare_face_image(face_img, target_size=512, margin_percent=0.5):
-    """Chuẩn hóa ảnh khuôn mặt về 512x512 với margin"""
+def prepare_face_image(face_img, target_size=512, margin_percent=0.2):
+    """Chuẩn hóa ảnh khuôn mặt về 512x512 với crop sát mặt hơn
+    
+    Args:
+        face_img: Ảnh khuôn mặt crop từ camera
+        target_size: Kích thước output (mặc định 512x512)
+        margin_percent: Phần trăm margin quanh mặt (0.2 = crop sát mặt hơn, cũ là 0.5)
+    """
     try:
         h, w = face_img.shape[:2]
         logger.info(f"📐 Ảnh gốc: {w}x{h} pixels")
@@ -70,7 +76,7 @@ def prepare_face_image(face_img, target_size=512, margin_percent=0.5):
         
         canvas_size = max(w, h) + max(margin_w, margin_h) * 2
         canvas = np.zeros((canvas_size, canvas_size, 3), dtype=np.uint8)
-        canvas.fill(114)
+        canvas.fill(114)  # Màu nền xám
         
         start_x = (canvas_size - w) // 2
         start_y = (canvas_size - h) // 2
@@ -79,7 +85,7 @@ def prepare_face_image(face_img, target_size=512, margin_percent=0.5):
         interpolation = cv2.INTER_AREA if canvas_size > target_size else cv2.INTER_CUBIC
         resized = cv2.resize(canvas, (target_size, target_size), interpolation=interpolation)
         
-        logger.info(f"✅ Đã chuẩn hóa: {w}x{h} → {target_size}x{target_size}")
+        logger.info(f"✅ Đã chuẩn hóa (margin={margin_percent}): {w}x{h} → {target_size}x{target_size}")
         return resized
     except Exception as e:
         logger.error(f"❌ Lỗi chuẩn hóa ảnh: {e}")
