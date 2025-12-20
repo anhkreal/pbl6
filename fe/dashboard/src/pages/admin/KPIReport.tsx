@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { fetchKPI, KPIItem } from '../../api/kpi';
 import ErrorBanner from '../../components/ErrorBanner';
+import SkeletonTable from '../../components/SkeletonTable';
+import { downloadCSV } from '../../utils/csv';
 
 const td: React.CSSProperties = { padding: 10, fontSize: 14 };
 
@@ -84,8 +86,28 @@ export default function AdminKPIReport() {
       </div>
 
       <div className="card">
-        {loading && <div className="card-body">Đang tải...</div>}
+        {loading && <div className="card-body"><SkeletonTable rows={6} cols={6} /></div>}
         {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={() => {
+            const headers = [
+              { key: 'date', label: 'Ngay' },
+              { key: 'userName', label: 'NhanVien' },
+              { key: 'emotionScore', label: 'Emotion' },
+              { key: 'attendanceScore', label: 'Attendance' },
+              { key: 'totalScore', label: 'Total' },
+              { key: 'remark', label: 'NhanXet' },
+            ];
+            downloadCSV('kpi_admin.csv', filtered.map(k => ({
+              date: k.date,
+              userName: k.userName,
+              emotionScore: k.emotionScore.toFixed(2),
+              attendanceScore: k.attendanceScore.toFixed(2),
+              totalScore: k.totalScore.toFixed(2),
+              remark: k.remark || ''
+            })), headers);
+          }}>Xuất CSV</button>
+        </div>
         <table className="table">
           <thead>
             <tr>

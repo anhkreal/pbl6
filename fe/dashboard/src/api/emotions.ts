@@ -28,8 +28,9 @@ export interface EmotionQueryParams {
 }
 
 export interface EmotionFetchResult {
-  total: number;
+  total: number; // total items in current filter (may be page total depending on BE)
   logs: EmotionLog[];
+  total_all?: number; // unpaginated total across all pages if provided by backend
 }
 
 export async function fetchEmotionLogs(params: EmotionQueryParams = {}): Promise<EmotionFetchResult> {
@@ -65,7 +66,7 @@ export async function fetchEmotionLogs(params: EmotionQueryParams = {}): Promise
       const res: any = await apiFetch<any>(`/emotion?${qp.toString()}`);
       // Debug: log successful response for visibility
       console.debug('[fetchEmotionLogs] success', { url: `/emotion?${qp.toString()}`, res });
-      // Expected backend shape: { success: true, total: number, logs: [...] }
+      // Expected backend shape: { success: true, total: number, total_all?: number, logs: [...] }
       // Coerce total to a number if present; otherwise use mapped.length as fallback
       // (some backends may return total as a string)
       let totalRaw: any = res?.total ?? res?.count;
@@ -90,7 +91,9 @@ export async function fetchEmotionLogs(params: EmotionQueryParams = {}): Promise
       }));
 
       const totalNum = totalRaw != null ? Number(totalRaw) : mapped.length;
-      return { total: Number.isFinite(totalNum) ? totalNum : mapped.length, logs: mapped };
+      const totalAllRaw: any = res?.total_all;
+      const totalAllNum = totalAllRaw != null ? Number(totalAllRaw) : undefined;
+      return { total: Number.isFinite(totalNum) ? totalNum : mapped.length, logs: mapped, total_all: Number.isFinite(totalAllNum as number) ? (totalAllNum as number) : undefined };
     } catch (err: any) {
       lastErr = err;
       // Debug: try a raw fetch to capture response body/status for server 500s

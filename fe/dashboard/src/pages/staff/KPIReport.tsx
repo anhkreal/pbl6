@@ -3,6 +3,8 @@ import StaffLayout from '../../layouts/StaffLayout';
 import { fetchKPI, KPIItem } from '../../api/kpi';
 import { apiFetch } from '../../api/http';
 import ErrorBanner from '../../components/ErrorBanner';
+import SkeletonTable from '../../components/SkeletonTable';
+import { downloadCSV } from '../../utils/csv';
 
 export default function StaffKPIReport() {
   const [mode, setMode] = useState<'day' | 'month'>('day');
@@ -112,10 +114,28 @@ export default function StaffKPIReport() {
         </div>
       </div>
       <div className="card">
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={() => {
+            const headers = [
+              { key: 'date', label: 'Ngay' },
+              { key: 'attendanceScore', label: 'ChuyenCan' },
+              { key: 'emotionScore', label: 'CamXuc' },
+              { key: 'totalScore', label: 'Tong' },
+              { key: 'remark', label: 'NhanXet' },
+            ];
+            downloadCSV('kpi_staff.csv', data.map(r => ({
+              date: r.date,
+              attendanceScore: r.attendanceScore.toFixed(2),
+              emotionScore: r.emotionScore.toFixed(2),
+              totalScore: r.totalScore.toFixed(2),
+              remark: r.remark || ''
+            })), headers);
+          }}>Xuất CSV</button>
+        </div>
         <table className="table">
           <thead><tr>{['STT', 'Ngày', 'Chuyên cần', 'Cảm xúc', 'Tổng', 'Nhận xét'].map(h => <th key={h}>{h}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td style={{ padding: 10 }} colSpan={5}>Đang tải...</td></tr>}
+            {loading && <tr><td style={{ padding: 10 }} colSpan={6}><SkeletonTable rows={4} cols={6} /></td></tr>}
             {error && <tr><td style={{ padding: 10 }} colSpan={6}><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></td></tr>}
             {data.map((r, i) => (
               <tr key={r.date}>

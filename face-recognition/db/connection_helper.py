@@ -1,4 +1,5 @@
 from db.mysql_conn import get_connection
+import pymysql
 
 class ConnectionHelper:
     def __enter__(self):
@@ -7,9 +8,20 @@ class ConnectionHelper:
         return self.cursor
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self.conn.commit()
-        else:
-            self.conn.rollback()
-        self.cursor.close()
-        self.conn.close()
+        try:
+            if exc_type is None:
+                self.conn.commit()
+            else:
+                self.conn.rollback()
+        except (pymysql.err.InterfaceError, pymysql.err.OperationalError) as e:
+            # Connection already closed or lost, log but don't raise
+            print(f"Warning: Connection error during commit/rollback: {e}")
+        finally:
+            try:
+                self.cursor.close()
+            except Exception:
+                pass
+            try:
+                self.conn.close()
+            except Exception:
+                pass

@@ -3,6 +3,9 @@ import { fetchEmotionLogsForUser, EmotionLog } from '../../api/emotions';
 import { apiFetch } from '../../api/http';
 import ErrorBanner from '../../components/ErrorBanner';
 import StaffLayout from '../../layouts/StaffLayout';
+import { resolveUserId } from '../../utils/user';
+import SkeletonTable from '../../components/SkeletonTable';
+import { downloadCSV } from '../../utils/csv';
 
 function emotionBadgeClass(emotion: string): string {
   const map: Record<string, string> = {
@@ -24,6 +27,7 @@ export default function StaffEmotionLog() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [total, setTotal] = useState<number | null>(null);
+  const [totalAll, setTotalAll] = useState<number | null>(null);
   const [limit] = useState(30);
   const [offset, setOffset] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -34,34 +38,10 @@ export default function StaffEmotionLog() {
       setLoading(true);
       setError('');
 
-      // Try to resolve user id from sessionStorage first
-      const possibleKeys = ['userId', 'user_id', 'id', 'uid'];
-      let uid: number | null = null;
-      for (const k of possibleKeys) {
-        const v = sessionStorage.getItem(k);
-        if (!v) continue;
-        const n = Number(v);
-        if (!Number.isNaN(n) && n > 0) { uid = n; break; }
-        try {
-          const parsed = JSON.parse(v);
-          const candidate = Number(parsed?.id ?? parsed?.user_id);
-          if (!Number.isNaN(candidate) && candidate > 0) { uid = candidate; break; }
-        } catch { /* ignore */ }
-      }
-
-      let resolvedId = uid;
+      // Resolve user id centrally
+      let resolvedId = await resolveUserId();
       try {
-        if (!resolvedId) {
-          const me: any = await apiFetch('/auth/me');
-          const candidate = Number(me?.user?.id ?? me?.id);
-          if (!Number.isNaN(candidate) && candidate > 0) {
-            resolvedId = candidate;
-          } else if (me?.username) {
-            const info: any = await apiFetch(`/taikhoan/${encodeURIComponent(me.username)}`);
-            const candidate2 = Number(info?.user?.id ?? info?.id);
-            if (!Number.isNaN(candidate2) && candidate2 > 0) resolvedId = candidate2;
-          }
-        }
+        // fallback path retained via resolveUserId implementation
 
         if (!resolvedId) {
           throw new Error('Không xác định userId. Vui lòng đăng nhập lại.');
@@ -80,6 +60,7 @@ export default function StaffEmotionLog() {
         if (!ignore) {
           setLogs(res.logs || []);
           setTotal(res.total ?? null);
+          setTotalAll((res as any).total_all ?? null);
         }
       } catch (e: any) {
         if (!ignore) setError(e?.message || 'Lỗi tải dữ liệu');
@@ -102,9 +83,29 @@ export default function StaffEmotionLog() {
         <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <button className="btn btn-ghost" onClick={() => setOffset(o => Math.max(0, o - limit))} disabled={offset <= 0} style={{ marginRight: 8 }}>Trước</button>
-            <button className="btn btn-ghost" onClick={() => setOffset(o => o + limit)} disabled={total !== null && offset + limit >= (total ?? 0)}>Sau</button>
+            <button className="btn btn-ghost" onClick={() => setOffset(o => o + limit)} disabled={(() => {
+              const cap = (totalAll ?? total);
+              if (cap == null) return false; // unknown
+              return offset + limit >= cap;
+            })()}>Sau</button>
           </div>
-          <div>Trang: {Math.floor(offset / limit) + 1}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button className="btn" onClick={() => {
+              const headers = [
+                { key: 'id', label: 'ID' },
+                { key: 'timestamp', label: 'ThoiDiem' },
+                { key: 'emotion', label: 'CamXuc' },
+                { key: 'userId', label: 'UserID' },
+              ];
+              downloadCSV('emotion_staff.csv', rows.map(r => ({ id: r.id, timestamp: r.timestamp, emotion: r.emotion, userId: r.userId })), headers);
+            }}>Xuất CSV</button>
+            {(() => {
+              const page = Math.floor(offset / limit) + 1;
+              const cap = (totalAll ?? total);
+              const pages = cap != null ? Math.max(1, Math.ceil(cap / limit)) : undefined;
+              return pages ? `Trang: ${page} / ${pages}` : `Trang: ${page}`;
+            })()}
+          </div>
         </div>
       </div>
 
@@ -116,16 +117,14 @@ export default function StaffEmotionLog() {
       </div>
 
       <div className="card" style={{ overflowX: 'auto' }}>
+        {!loading && (
         <table className="table">
           <thead>
             <tr>
-              {['STT', 'Thời điểm', 'Loại', 'Hình ảnh', 'User ID'].map(h => <th key={h}>{h}</th>)}
+              {['STT', 'Thời điểm', 'Loại', 'Hình ảnh', 'Nhân viên'].map(h => <th key={h}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
-            {loading && (
-              <tr><td colSpan={5} style={{ padding: 10 }}>Đang tải...</td></tr>
-            )}
             {!loading && rows.map((l, i) => (
               <tr key={l.id}>
                 <td>{i + 1 + Math.floor(offset / limit) * limit}</td>
@@ -139,7 +138,7 @@ export default function StaffEmotionLog() {
                     return <img src={src} alt="" style={{ width: 46, height: 46, borderRadius: 4, objectFit: 'cover' }} />;
                   })()}
                 </td>
-                <td>{l.userId ?? '--'}</td>
+                <td>{l.userName || (l.userId ?? '--')}</td>
               </tr>
             ))}
             {!loading && rows.length === 0 && (
@@ -147,6 +146,8 @@ export default function StaffEmotionLog() {
             )}
           </tbody>
         </table>
+        )}
+        {loading && <div className="card-body"><SkeletonTable rows={6} cols={5} /></div>}
       </div>
     </StaffLayout>
   );

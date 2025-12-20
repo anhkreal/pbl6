@@ -130,6 +130,23 @@ TABLE_SQLS = [
         CONSTRAINT fk_kpi_user FOREIGN KEY (user_id) REFERENCES nhanvien(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """,
+
+    # per-shift attendance tracking (absence_count and last_seen per user per shift/day)
+    """
+    CREATE TABLE IF NOT EXISTS shift_attendance (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        date DATE NOT NULL,
+        shift VARCHAR(50) NOT NULL, -- 'day' (08:00-14:00) or 'night' (14:00-20:00)
+        absence_count INT DEFAULT 0,
+        last_seen DATETIME NULL,
+        serving_time TINYINT(1) DEFAULT 0, -- True khi đang phục vụ khách
+        no_serving_count INT DEFAULT 0, -- Đếm lần liên tiếp không phục vụ
+        updated_at DATETIME NULL,
+        UNIQUE KEY uniq_shift_user_date (user_id, date, shift),
+        CONSTRAINT fk_shift_att_user FOREIGN KEY (user_id) REFERENCES nhanvien(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """,
 ]
 
 
@@ -153,6 +170,24 @@ def create_database_and_tables(host=None, port=None, user=None, password=None, d
             for sql in TABLE_SQLS:
                 print("Executing table DDL...")
                 cursor.execute(sql)
+
+            # Ensure new shift_attendance columns exist even on pre-existing DBs
+            print("Ensuring shift_attendance columns exist...")
+            cursor.execute("SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=%s AND TABLE_NAME='shift_attendance' AND COLUMN_NAME='serving_time'", (db_name,))
+            has_serving = cursor.fetchone().get('cnt', 0) > 0
+            if not has_serving:
+                cursor.execute("ALTER TABLE shift_attendance ADD COLUMN serving_time TINYINT(1) DEFAULT 0 COMMENT 'True khi nhân viên đang phục vụ khách hàng'")
+
+            cursor.execute("SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=%s AND TABLE_NAME='shift_attendance' AND COLUMN_NAME='no_serving_count'", (db_name,))
+            has_no_serv = cursor.fetchone().get('cnt', 0) > 0
+            if not has_no_serv:
+                cursor.execute("ALTER TABLE shift_attendance ADD COLUMN no_serving_count INT DEFAULT 0 COMMENT 'Đếm số lần liên tiếp không phát hiện isServing (reset về 0 sau 2 lần)'")
+
+            # Ensure index exists
+            cursor.execute("SELECT COUNT(*) AS cnt FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=%s AND TABLE_NAME='shift_attendance' AND INDEX_NAME='idx_shift_attendance_serving'", (db_name,))
+            has_index = cursor.fetchone().get('cnt', 0) > 0
+            if not has_index:
+                cursor.execute("CREATE INDEX idx_shift_attendance_serving ON shift_attendance(user_id, date, shift, serving_time)")
         conn.commit()
         print("Database and tables created/verified successfully.")
     except Exception as e:

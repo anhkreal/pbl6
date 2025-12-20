@@ -1,3 +1,14 @@
+"""
+KPI Service Layer
+-----------------
+Các hàm thao tác với cơ sở dữ liệu thật cho KPI: thêm, cập nhật, truy vấn, tìm kiếm theo user/date.
+"""
+
+from db.nguoi_repository import NguoiRepository
+from db.models import KPI
+
+nguoi_repo = NguoiRepository()
+
 def get_kpi_by_user_and_date_service(user_id: int, date: str):
     """Lấy KPI theo user_id và ngày (YYYY-MM-DD)."""
     try:
@@ -11,16 +22,6 @@ def get_kpi_by_user_and_date_service(user_id: int, date: str):
             return {"success": False, "message": "Không tìm thấy KPI với user_id và ngày này"}
     except Exception as e:
         return {"success": False, "message": f"Lỗi khi truy vấn KPI: {e}"}
-"""
-KPI Service Layer
------------------
-Các hàm thao tác với cơ sở dữ liệu thật cho KPI: thêm, cập nhật, truy vấn, tìm kiếm theo user/date.
-"""
-
-from db.nguoi_repository import NguoiRepository
-from db.models import KPI
-
-nguoi_repo = NguoiRepository()
 
 def add_kpi_service(user_id: int, date: str, emotion_score: float, attendance_score: float, total_score: float, remark: str = None):
     """Thêm KPI vào cơ sở dữ liệu."""

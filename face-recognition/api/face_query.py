@@ -13,6 +13,7 @@ from service.checkin_service import checkin_service as svc_checkin
 from service.add_emotion_service import add_emotion_service
 from service.add_emotion_service import add_emotion_service
 from service.checkout_service import checkout as svc_checkout
+from service.shift_attendance_service import mark_seen
 from fastapi import Form
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import JSONResponse
@@ -149,27 +150,64 @@ async def query_face(
                     )
                     print(f"[info] Logged not-good emotion '{emotion_str}' for user_id {class_id}. Result: {log_result}")
 
-                    # --- Cập nhật KPI: trừ điểm emotion_score theo isServing, cập nhật total_score ---
-                    from datetime import datetime
-                    import pytz
-                    from service.kpi_service import get_kpi_by_user_and_date_service, update_kpi_service
-                    tz = pytz.timezone('Asia/Ho_Chi_Minh')
-                    now = datetime.now(tz)
-                    today = now.date()
-                    kpi_res = get_kpi_by_user_and_date_service(int(class_id), str(today))
-                    if kpi_res.get('success') and kpi_res.get('kpi'):
-                        kpi_id = kpi_res['kpi']['id']
-                        old_emotion_score = kpi_res['kpi'].get('emotion_score', 100.0) or 100.0
-                        attendance_score = kpi_res['kpi'].get('attendance_score', 100.0) or 100.0
-                        # Trừ điểm theo isServing
-                        minus = 5 if isServing else 2
-                        new_emotion_score = max(0, old_emotion_score - minus)
-                        total_score = new_emotion_score * 0.3 + attendance_score * 0.7
-                        remark = kpi_res['kpi'].get('remark', '')
-                        update_kpi_service(kpi_id, int(class_id), str(today), new_emotion_score, attendance_score, total_score, remark)
+                    # --- Cập nhật KPI: CHỈ trừ điểm khi isServing=True VÀ serving_time=False ---
+                    # Logic: Chỉ trừ điểm cho lần đầu tiên phát hiện khách hàng (serving_time=False)
+                    # Sau đó chuyển serving_time=True để không trừ điểm lần nữa cho cùng khách
+                    if isServing:  # Có khách hàng
+                        from datetime import datetime
+                        import pytz
+                        from db.nguoi_repository import NguoiRepository
+                        from service.kpi_service import get_kpi_by_user_and_date_service, update_kpi_service
+                        from service.shift_attendance_service import current_shift
+                        
+                        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+                        now = datetime.now(tz)
+                        today = now.date()
+                        shift_name = current_shift(now)
+                        
+                        # Kiểm tra serving_time
+                        repo = NguoiRepository()
+                        shift_att = repo.get_shift_attendance(int(class_id), today, shift_name)
+                        
+                        if shift_att:
+                            serving_time = shift_att.get('serving_time', False)
+                            
+                            # CHỈ trừ điểm khi serving_time=False (lần đầu gặp khách)
+                            if not serving_time:
+                                print(f"[info] Trừ điểm KPI cho user {class_id} - Lần đầu phát hiện khách hàng")
+                                
+                                kpi_res = get_kpi_by_user_and_date_service(int(class_id), str(today))
+                                if kpi_res.get('success') and kpi_res.get('kpi'):
+                                    from service.shift_attendance_service import EMOTION_PENALTIES
+                                    
+                                    kpi_id = kpi_res['kpi']['id']
+                                    old_emotion_score = kpi_res['kpi'].get('emotion_score', 100.0) or 100.0
+                                    attendance_score = kpi_res['kpi'].get('attendance_score', 100.0) or 100.0
+                                    
+                                    # Trừ điểm theo trọng số của từng cảm xúc
+                                    penalty = EMOTION_PENALTIES.get(emotion_str, 5.0)
+                                    new_emotion_score = max(0, old_emotion_score - penalty)
+                                    total_score = new_emotion_score * 0.3 + attendance_score * 0.7
+                                    remark = kpi_res['kpi'].get('remark', '')
+                                    
+                                    update_kpi_service(kpi_id, int(class_id), str(today), new_emotion_score, attendance_score, total_score, remark)
+                                    print(f"[info] Đã trừ {penalty} điểm emotion_score cho {emotion_str}")
+                            else:
+                                print(f"[info] Bỏ qua trừ điểm - serving_time=True (đã trừ cho khách này rồi)")
+                        else:
+                            print(f"[warning] Không tìm thấy shift_attendance cho user {class_id}")
 
         if result.get('matched_image_emotion'):
             basic_result['matched_image_emotion'] = result.get('matched_image_emotion')
+
+        # Cập nhật hiện diện: last_seen cho ca hiện tại
+        try:
+            if basic_result.get("class_id") is not None:
+                # Pass isServing to mark_seen for tracking
+                from service.shift_attendance_service import mark_seen
+                mark_seen(int(basic_result.get("class_id")), is_serving=isServing)
+        except Exception:
+            pass
 
         result = basic_result
         status_code = 200
@@ -311,18 +349,27 @@ async def query_and_checkout(
                         check_out = tz.localize(check_out)
                     # Always use now as the latest checkout (overwrite)
                     check_out = now
-                    # Calculate working hours
+                    # Calculate working hours, subtract absence_time (absence_count * 10s)
                     total_seconds = (check_out - check_in).total_seconds() if (check_in and check_out) else 0
+                    try:
+                        absence_count = nguoi_repo.get_absence_count_for_shift(user_id=int(class_id), date_only=today, shift=shift)
+                    except Exception:
+                        absence_count = 0
+                    absent_seconds = (absence_count or 0) * 10
+                    if absent_seconds > 0:
+                        total_seconds = max(0.0, total_seconds - absent_seconds)
                     total_hours = round(total_seconds / 3600.0, 2)
                     # Save new checkout and total_hours (overwrite)
                     nguoi_repo.update_checkin_checkout(row_id=checklog.get('id'), check_out=now.replace(tzinfo=None), total_hours=total_hours, status=checklog.get('status'), edited_by=None, note=None)
                     # Calculate late/early
+                    # Use centralized shift config
+                    from utils.shift_config import SHIFT_DAY_START, SHIFT_DAY_END, SHIFT_NIGHT_START, SHIFT_NIGHT_END
                     if shift == 'day':
-                        work_start = dtime(8, 0, 0)
-                        work_end = dtime(17, 0, 0)
+                        work_start = SHIFT_DAY_START
+                        work_end = SHIFT_DAY_END
                     else:
-                        work_start = dtime(20, 0, 0)
-                        work_end = dtime(6, 0, 0)
+                        work_start = SHIFT_NIGHT_START
+                        work_end = SHIFT_NIGHT_END
                     late_minutes = 0
                     if check_in and check_in.time() > work_start:
                         late_minutes = int((datetime.combine(today, check_in.time()) - datetime.combine(today, work_start)).total_seconds() // 60)
@@ -330,12 +377,8 @@ async def query_and_checkout(
                         remark += f"Đi trễ {late_minutes} phút. " if late_minutes > 0 else ""
                     early_minutes = 0
                     if check_out:
-                        if shift == 'night' and check_out.time() < work_end:
-                            work_end_dt = datetime.combine(today + timedelta(days=1), work_end)
-                            check_out_dt = datetime.combine(today + timedelta(days=1), check_out.time())
-                        else:
-                            work_end_dt = datetime.combine(today, work_end)
-                            check_out_dt = datetime.combine(today, check_out.time())
+                        work_end_dt = datetime.combine(today, work_end)
+                        check_out_dt = datetime.combine(today, check_out.time())
                         if check_out_dt < work_end_dt:
                             early_minutes = int((work_end_dt - check_out_dt).total_seconds() // 60)
                             attendance_score -= min(early_minutes, 10)

@@ -15,6 +15,7 @@ def query_emotion_service(user_id: int = None, emotion_type: str = None, start_t
         end_dt = parse_to_utc_naive(end_ts)
 
         faces = nguoi_repo.query_emotion_logs(user_id=user_id, emotion_type=emotion_type, start_ts=start_dt, end_ts=end_dt, limit=limit, offset=offset)
+        total_all = nguoi_repo.count_emotion_logs(user_id=user_id, emotion_type=emotion_type, start_ts=start_dt, end_ts=end_dt)
         result = []
         for f in faces:
             d = f.to_dict(include_image_base64=include_image_base64)
@@ -24,6 +25,6 @@ def query_emotion_service(user_id: int = None, emotion_type: str = None, start_t
             except Exception:
                 d['user_name'] = None
             result.append(d)
-        return {"success": True, "total": len(result), "logs": result}
+        return {"success": True, "total": len(result), "total_all": int(total_all), "logs": result}
     except Exception as e:
         return {"success": False, "message": f"Lỗi khi truy vấn emotion logs: {e}", "status_code": 500}

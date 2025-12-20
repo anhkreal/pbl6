@@ -5,6 +5,7 @@ import { fetchCheckLogs } from '../../api/attendance';
 import { fetchKPI } from '../../api/kpi';
 import { fetchEmotionLogs } from '../../api/emotions';
 import { apiFetch } from '../../api/http';
+import { resolveUserId } from '../../utils/user';
 
 export default function StaffDashboard() {
   function todayGmt7() {
@@ -28,20 +29,7 @@ export default function StaffDashboard() {
     const m = /^(\d{2}:\d{2})/.exec(s);
     return m ? m[1] : s;
   }
-  async function resolveUserId(): Promise<number | null> {
-    const possibleKeys = ['userId', 'user_id', 'id', 'uid'];
-    for (const k of possibleKeys) {
-      const v = sessionStorage.getItem(k);
-      if (v) {
-        const n = Number(v);
-        if (!Number.isNaN(n) && n > 0) return n;
-        try { const parsed = JSON.parse(v); const cand = Number(parsed?.id ?? parsed?.user_id); if (!Number.isNaN(cand) && cand > 0) return cand; } catch {}
-      }
-    }
-    try { const me:any = await apiFetch('/auth/me'); const c = Number(me?.id ?? me?.user_id ?? me?.user?.id); if (!Number.isNaN(c) && c > 0) return c; } catch {}
-    try { const username = sessionStorage.getItem('userName'); if (username) { const info:any = await apiFetch(`/taikhoan/${encodeURIComponent(username)}`); const uid = Number(info?.user?.id ?? info?.id); if (!Number.isNaN(uid) && uid > 0) { sessionStorage.setItem('userId', String(uid)); return uid; } } } catch {}
-    return null;
-  }
+  // resolveUserId moved to utils/user.ts
 
   const [checkIn, setCheckIn] = useState('--');
   const [hoursSoFar, setHoursSoFar] = useState(0);

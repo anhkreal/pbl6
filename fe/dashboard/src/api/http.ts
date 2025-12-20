@@ -15,15 +15,18 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  // Debug: log outgoing request
+  // Debug: log outgoing request, but redact Authorization
   try {
     const shortBody = typeof options.body === 'string' && (options.body as string).length < 2000 ? options.body : undefined;
-    console.debug('[apiFetch] Request', { method: options.method || 'GET', url, headers, bodyPreview: shortBody });
+    const safeHeaders = { ...(headers as any) };
+    if (safeHeaders.Authorization) safeHeaders.Authorization = '<redacted>';
+    console.debug('[apiFetch] Request', { method: options.method || 'GET', url, headers: safeHeaders, bodyPreview: shortBody });
   } catch (_) {}
 
   let res: Response;
   try {
-    res = await fetch(url, { ...options, headers });
+    // Always include credentials so server cookies (session_token) are sent/received
+    res = await fetch(url, { ...options, headers, credentials: 'include' });
   } catch (netErr: any) {
     console.error('[apiFetch] Network error', netErr);
     throw new Error('Không thể kết nối máy chủ. Vui lòng kiểm tra mạng và thử lại.');
@@ -34,8 +37,40 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const isJson = ct.includes('application/json');
 
   if (status === 401) {
-    sessionStorage.clear();
-    console.warn('[apiFetch] Unauthorized, clearing session');
+    // If we sent an Authorization header, retry ONCE without it to allow valid cookies to authenticate.
+    const hadAuthHeader = !!headers.Authorization;
+    if (hadAuthHeader) {
+      try {
+        const { Authorization, ...restHeaders } = headers as any;
+        const retry = await fetch(url, { ...options, headers: restHeaders, credentials: 'include' });
+        if (retry.ok) {
+          // Our bearer token was stale, but cookie worked. Drop token to avoid future 401s.
+          try { sessionStorage.removeItem('authToken'); } catch {}
+          const ct2 = retry.headers.get('content-type') || '';
+          if (retry.status === 204) return {} as T;
+          if (ct2.includes('application/json')) {
+            const data2 = await retry.json();
+            return data2 as T;
+          } else {
+            const text2 = await retry.text();
+            console.error('[apiFetch] Unexpected non-JSON after retry', { status: retry.status, path, preview: text2.slice(0,200) });
+            throw new Error('Phản hồi không hợp lệ từ máy chủ. Vui lòng thử lại sau.');
+          }
+        }
+      } catch (e) {
+        // fallthrough to expire flow
+      }
+    }
+    // Final: clear session and hard-redirect to login
+    try { sessionStorage.clear(); } catch {}
+    console.warn('[apiFetch] Unauthorized, session expired. Redirecting to login.');
+    try {
+      // Signal to app and trigger redirect
+      window.dispatchEvent(new CustomEvent('auth:expired'));
+      if (typeof window !== 'undefined' && window.location) {
+        window.location.assign('/');
+      }
+    } catch {}
     throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
   }
 

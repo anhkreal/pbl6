@@ -87,6 +87,8 @@ MAX_RETRY = 2
 AUTO_SEND_INTERVAL = 10  # Gửi ảnh về backend mỗi 10 giây
 RECOGNITION_EXPIRE_TIME = 30  # Xóa kết quả nhận diện sau 30 giây
 TRACKING_STABLE_TIME = 2  # Tracking phải tồn tại ít nhất 2 giây trước khi gửi
+ABSENCE_CYCLE_THRESHOLD = 3  # Số chu kỳ auto-send không nhận diện thì đánh dấu vắng
+EXPECTED_USERS_REFRESH_MINUTES = 30  # Làm mới danh sách nhân viên theo ca
 
 # --- Ultrasonic sensor config (customer detector) ---
 ULTRASONIC_TRIG_PIN = 5   # BCM, chân vật lý 29
@@ -146,6 +148,8 @@ current_frame_for_save = None
 last_auto_send_time = 0  # Thời gian gửi ảnh tự động lần cuối
 recognized_names = {}  # {tracking_id: (name, score, timestamp)}
 distance_sensor: Optional[DistanceSensor] = None
+expected_users: Dict[int, Dict[str, Any]] = {}  # {user_id: {full_name, shift, username}}
+absence_state: Dict[int, Dict[str, Any]] = {}    # {user_id: {missed_cycles, absent_marked}}
 
 # ========== HIỂN THỊ TEXT TIẾNG VIỆT ==========
 def put_vn_text(img, text, pos, font_size=22, color=(255, 255, 0)):
@@ -287,6 +291,75 @@ def auto_send_face_to_backend(face_image, tracking_id) -> Optional[Dict[str, Any
         logger.error(f"❌ Lỗi gửi ảnh: {str(e)}")
         traceback.print_exc()
         return None
+
+
+# ========== XÁC ĐỊNH CA LÀM VIỆC HIỆN TẠI ==========
+def get_current_shift() -> str:
+    try:
+        now = datetime.now()
+        # Quy ước đơn giản: trước 14:00 là 'day', sau là 'night'
+        return 'night' if now.hour >= 14 else 'day'
+    except Exception:
+        return 'day'
+
+
+# ========== LẤY DANH SÁCH NHÂN VIÊN THEO CA ==========
+def fetch_expected_users() -> None:
+    """Gọi API /users để lấy danh sách nhân viên đang làm việc theo ca hiện tại."""
+    global expected_users, absence_state
+    shift = get_current_shift()
+    try:
+        resp = requests.get(
+            f"{BACKEND_URL}/users",
+            params={"status": "working", "shift": shift, "page": 1, "page_size": 200},
+            headers=headers,
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            data = resp.json() or {}
+            users = data.get('users', [])
+            expected_users = {}
+            absence_state = {}
+            for u in users:
+                uid = int(u.get('id')) if u.get('id') is not None else None
+                if uid is None:
+                    continue
+                expected_users[uid] = {
+                    'full_name': u.get('full_name') or u.get('username') or f"User {uid}",
+                    'shift': u.get('shift') or shift,
+                    'username': u.get('username')
+                }
+                absence_state[uid] = {'missed_cycles': 0, 'absent_marked': False}
+            logger.info(f"✓ Tải danh sách nhân viên theo ca '{shift}': {len(expected_users)} người")
+        else:
+            logger.warning(f"⚠ Không lấy được danh sách users (status {resp.status_code})")
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi lấy danh sách users: {e}")
+
+
+# ========== ĐÁNH DẤU VẮNG TRÊN BACKEND ==========
+def mark_absent_on_backend(user_id: int, note: str = None) -> bool:
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/checklog/mark-absent/{user_id}",
+            data={"note": note or "Auto-marked absent: not seen in 3 cycles"},
+            headers=headers,
+            timeout=5,
+        )
+        if resp.status_code == 200:
+            logger.info(f"✓ Đánh dấu vắng user_id={user_id} thành công")
+            return True
+        else:
+            body = {}
+            try:
+                body = resp.json()
+            except Exception:
+                pass
+            logger.warning(f"✗ Đánh dấu vắng thất bại (status {resp.status_code}): {body}")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Lỗi khi đánh dấu vắng: {e}")
+        return False
 
 # ========== GỌI API CHECK-IN ==========
 def recognize_and_checkin(face_image, tracking_id) -> Optional[Dict[str, Any]]:
@@ -596,6 +669,10 @@ def main():
     # Khởi tạo cảm biến siêu âm (khách hàng)
     init_distance_sensor()
 
+    # Tải danh sách nhân viên theo ca
+    fetch_expected_users()
+    last_expected_refresh = time.time()
+
     # In thông tin hệ thống
     print("\n" + "="*60)
     print("🎥 RASPBERRY FACE RECOGNITION - KPI MODE WITH TEXT-TO-SPEECH")
@@ -722,13 +799,52 @@ def main():
                     # Gửi ảnh về backend để nhận diện (không lưu check-in/out)
                     print(f"\n⏰ {datetime.now().strftime('%H:%M:%S')} - Gửi ảnh tự động...")
                     print(f"   Tracking ID {best_face_id} (đã tracking {tracking_age:.1f}s)")
-                    auto_send_face_to_backend(best_face_img, best_face_id)
+                    result = auto_send_face_to_backend(best_face_img, best_face_id)
+                    # ===== CẬP NHẬT LOGIC VẮNG MẶT =====
+                    recognized_user_id = None
+                    if result and result.get('action') == 'face_recognized':
+                        try:
+                            recognized_user_id = int(result.get('class_id'))
+                        except Exception:
+                            recognized_user_id = None
+                    if expected_users:
+                        for uid in list(expected_users.keys()):
+                            state = absence_state.get(uid) or {'missed_cycles': 0, 'absent_marked': False}
+                            if recognized_user_id == uid:
+                                state['missed_cycles'] = 0
+                            else:
+                                if not state.get('absent_marked'):
+                                    state['missed_cycles'] = int(state.get('missed_cycles', 0)) + 1
+                                    if state['missed_cycles'] >= ABSENCE_CYCLE_THRESHOLD:
+                                        ok = mark_absent_on_backend(uid, note=f"RPI: không nhận diện trong {ABSENCE_CYCLE_THRESHOLD} chu kỳ")
+                                        state['absent_marked'] = ok
+                                        # Phản hồi âm thanh nhẹ
+                                        if ok:
+                                            speak_text(f"Đánh dấu vắng cho {expected_users[uid]['full_name']}", is_async=True, lang='vi')
+                            absence_state[uid] = state
                 else:
                     logger.debug("Không có khuôn mặt nào đủ ổn định để gửi")
             else:
                 logger.debug("Không có khuôn mặt để gửi")
+                # Không phát hiện khuôn mặt -> tính là một chu kỳ không nhận diện
+                if expected_users:
+                    for uid in list(expected_users.keys()):
+                        state = absence_state.get(uid) or {'missed_cycles': 0, 'absent_marked': False}
+                        if not state.get('absent_marked'):
+                            state['missed_cycles'] = int(state.get('missed_cycles', 0)) + 1
+                            if state['missed_cycles'] >= ABSENCE_CYCLE_THRESHOLD:
+                                ok = mark_absent_on_backend(uid, note=f"RPI: không nhận diện trong {ABSENCE_CYCLE_THRESHOLD} chu kỳ (no face)")
+                                state['absent_marked'] = ok
+                                if ok:
+                                    speak_text(f"Đánh dấu vắng cho {expected_users[uid]['full_name']}", is_async=True, lang='vi')
+                        absence_state[uid] = state
             
             last_auto_send_time = current_time_sec
+
+        # Làm mới danh sách nhân viên theo ca định kỳ
+        if (current_time_sec - last_expected_refresh) >= (EXPECTED_USERS_REFRESH_MINUTES * 60):
+            fetch_expected_users()
+            last_expected_refresh = current_time_sec
 
         # ===== HIỂN THỊ THÔNG TIN TRÊN FRAME =====
         # Số lượng khuôn mặt

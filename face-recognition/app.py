@@ -38,6 +38,8 @@ from api.predict import predict_router
 from api.add_embedding_simple import simple_add_router
 from api.anti_spoofing import anti_spoofing_router
 from api.checklog import checklog_router
+from api.attendance_absent import attendance_absent_router
+from service.shift_attendance_service import start_scheduler_background
 # Optional performance monitoring
 try:
     from api.performance import performance_router
@@ -110,10 +112,18 @@ app.include_router(checkout.router)
     }
 )
 
-# CORS Configuration
+# CORS Configuration (must not use '*' when allow_credentials=True)
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://192.168.1.218:5173",
+    "https://192.168.1.218:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.1\.\d+)(:\d+)?$",
     allow_credentials=True,  # True để cho phép cookies/session
     allow_methods=["*"],
     allow_headers=["*"],
@@ -154,6 +164,7 @@ app.include_router(reset_router, tags=["🔄 Reset Database"])
 app.include_router(users_router, tags=["📋 Danh Sách Người"])
 app.include_router(add_users_router, tags=["➕ Quản Lý Người"])
 app.include_router(checklog_router, tags=["🕒 Checklog"])
+app.include_router(attendance_absent_router, tags=["🕒 Attendance"])
 app.include_router(edit_checklog_router, tags=["✏️ Edit Checklog"])
 app.include_router(predict_router, tags=["🤖 Dự Đoán"])
 app.include_router(health_router, tags=["❤️ Sức Khỏe"])
@@ -162,6 +173,11 @@ app.include_router(add_user_and_account_router, tags=["➕ Thêm Tài Khoản"])
 
 if PERFORMANCE_AVAILABLE:
     app.include_router(performance_router, prefix="/metrics", tags=["📈 Hiệu Suất"])
+
+# Background scheduler: start on app startup
+@app.on_event("startup")
+async def _start_scheduler():
+    start_scheduler_background()
 
 # Security Headers Middleware 
 @app.middleware("http")

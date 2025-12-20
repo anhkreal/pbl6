@@ -25,6 +25,7 @@ export interface CheckLogQuery {
 export interface CheckLogResult {
   total: number;
   checklogs: AttendanceRow[];
+  total_all?: number;
 }
 
 export async function fetchCheckLogs(q: CheckLogQuery = {}): Promise<CheckLogResult> {
@@ -52,7 +53,8 @@ export async function fetchCheckLogs(q: CheckLogQuery = {}): Promise<CheckLogRes
     shift: r.shift || 'day',
     status: r.status || 'normal'
   }));
-  return { total: totalNum, checklogs: mapped };
+  const total_all = res?.total_all != null ? Number(res.total_all) : undefined;
+  return { total: totalNum, checklogs: mapped, total_all };
 }
 
 export async function patchAttendanceStatus(id: number): Promise<void> {

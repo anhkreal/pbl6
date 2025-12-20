@@ -3,6 +3,8 @@ import AdminLayout from '../../layouts/AdminLayout';
 import { fetchCheckLogs, patchAttendanceStatus, AttendanceRow } from '../../api/attendance';
 import { verifyPin } from '../../api/pin';
 import ErrorBanner from '../../components/ErrorBanner';
+import SkeletonTable from '../../components/SkeletonTable';
+import { downloadCSV } from '../../utils/csv';
 
 export default function AdminAttendance(){
   function todayGmt7() {
@@ -23,6 +25,7 @@ export default function AdminAttendance(){
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
+  const [totalAll, setTotalAll] = useState<number | null>(null);
   const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
@@ -34,6 +37,7 @@ export default function AdminAttendance(){
         if (!ignore) {
           setRows(data.checklogs);
           setTotal(data.total);
+          setTotalAll((data as any).total_all ?? null);
         }
       } catch (e:any) {
         setError(e.message || 'Load thất bại');
@@ -81,12 +85,33 @@ export default function AdminAttendance(){
 
       <div className="card">
         <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>Tổng: <strong>{total ?? 0}</strong></div>
-          <div>
+          <div>Tổng: <strong>{(totalAll ?? total) ?? 0}</strong></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn" onClick={() => {
+              const headers = [
+                { key: 'userName', label: 'NhanVien' },
+                { key: 'date', label: 'Ngay' },
+                { key: 'checkIn', label: 'CheckIn' },
+                { key: 'checkOut', label: 'CheckOut' },
+                { key: 'totalHours', label: 'GioLam' },
+                { key: 'shift', label: 'Ca' },
+                { key: 'status', label: 'TrangThai' },
+              ];
+              downloadCSV('attendance_admin.csv', rows.map(r => ({
+                userName: r.userName,
+                date: r.date,
+                checkIn: r.checkIn || '',
+                checkOut: r.checkOut || '',
+                totalHours: r.totalHours ?? '',
+                shift: r.shift,
+                status: r.status
+              })), headers);
+            }}>Xuất CSV</button>
             <button className="btn btn-ghost" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
-            <button className="btn btn-ghost" style={{ marginLeft: 8 }} disabled={offset + limit >= (total ?? 0)} onClick={() => setOffset(offset + limit)}>Next</button>
+            <button className="btn btn-ghost" style={{ marginLeft: 8 }} disabled={(() => { const cap = (totalAll ?? total) ?? 0; return offset + limit >= cap; })()} onClick={() => setOffset(offset + limit)}>Next</button>
           </div>
         </div>
+        {!loading && (
         <table className="table">
           <thead>
             <tr>
@@ -128,7 +153,8 @@ export default function AdminAttendance(){
             ))}
           </tbody>
         </table>
-        {loading && <div className="card-body">Đang tải...</div>}
+        )}
+        {loading && <div className="card-body"><SkeletonTable rows={6} cols={8} /></div>}
         {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
       </div>
 

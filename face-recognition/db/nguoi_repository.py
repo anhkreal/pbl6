@@ -300,6 +300,32 @@ class NguoiRepository(ConnectionHelper):
             from db.models import EmotionLog
             return [EmotionLog.from_row(r) for r in rows]
 
+    def count_emotion_logs(self, user_id: int = None, emotion_type: str = None, start_ts=None, end_ts=None) -> int:
+        """Count emotion_log rows for given filters without pagination."""
+        sql = "SELECT COUNT(*) as total FROM emotion_log"
+        where = []
+        params = []
+        if user_id is not None:
+            where.append("user_id = %s")
+            params.append(user_id)
+        if emotion_type:
+            where.append("LOWER(emotion_type) = %s")
+            params.append(emotion_type.lower())
+        if start_ts:
+            where.append("captured_at >= %s")
+            params.append(start_ts)
+        if end_ts:
+            where.append("captured_at <= %s")
+            params.append(end_ts)
+
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+
+        with self as cursor:
+            cursor.execute(sql, tuple(params))
+            row = cursor.fetchone()
+            return int(row.get('total', 0))
+
     def delete_emotion_by_id(self, emotion_id: int):
         try:
             with self as cursor:
@@ -330,6 +356,19 @@ class NguoiRepository(ConnectionHelper):
             traceback.print_exc()
             return None
 
+    def add_absence(self, user_id: int, shift: str, edited_by: int = None, note: str = None):
+        """Insert an absence record for today without check_in/check_out and return lastrowid."""
+        try:
+            with self as cursor:
+                tz = pytz.timezone('Asia/Ho_Chi_Minh')
+                now = datetime.now(tz)
+                sql = "INSERT INTO checklog (user_id, date, shift, status, edited_by, note) VALUES (%s, %s, %s, %s, %s, %s)"
+                cursor.execute(sql, (user_id, now.date(), shift, 'absent', edited_by, note))
+                return cursor.lastrowid
+        except Exception:
+            traceback.print_exc()
+            return None
+
     def update_checkin_checkout(self, row_id: int, check_out, total_hours: float = None, status: str = None, edited_by: int = None, note: str = None):
         """Update a checklog row with checkout time, total_hours and optional status/note."""
         try:
@@ -340,6 +379,21 @@ class NguoiRepository(ConnectionHelper):
                 WHERE id = %s
                 """
                 cursor.execute(sql, (check_out, total_hours, status, edited_by, note, row_id))
+                return cursor.rowcount > 0
+        except Exception:
+            traceback.print_exc()
+            return False
+
+    def update_absent_to_checkin(self, row_id: int, check_in, status: str, note: str = None, edited_by: int = None):
+        """Convert an existing 'absent' row to a check-in by setting check_in and status."""
+        try:
+            with self as cursor:
+                sql = """
+                UPDATE checklog
+                SET check_in = %s, status = %s, edited_by = COALESCE(%s, edited_by), note = COALESCE(%s, note)
+                WHERE id = %s
+                """
+                cursor.execute(sql, (check_in, status, edited_by, note, row_id))
                 return cursor.rowcount > 0
         except Exception:
             traceback.print_exc()
@@ -359,6 +413,137 @@ class NguoiRepository(ConnectionHelper):
         where = []
         params = []
 
+    # ===== Shift Attendance Methods =====
+    def list_users_by_shift_status(self, shift: str, status: str = 'working'):
+        """Return list of users (nhanvien) by shift and status."""
+        try:
+            with self as cursor:
+                sql = "SELECT * FROM nhanvien WHERE (shift = %s OR %s IS NULL) AND (status = %s OR %s IS NULL)"
+                cursor.execute(sql, (shift, shift, status, status))
+                rows = cursor.fetchall() or []
+                return rows
+        except Exception:
+            traceback.print_exc()
+            return []
+
+    def get_shift_attendance(self, user_id: int, date_only, shift: str):
+        try:
+            with self as cursor:
+                sql = "SELECT * FROM shift_attendance WHERE user_id=%s AND date=%s AND shift=%s LIMIT 1"
+                cursor.execute(sql, (user_id, date_only, shift))
+                return cursor.fetchone()
+        except Exception:
+            traceback.print_exc()
+            return None
+
+    def upsert_shift_attendance(self, user_id: int, date_only, shift: str, last_seen=None, serving_time=None, no_serving_count=None):
+        """Insert or update a shift_attendance row; if exists, update last_seen, serving_time, no_serving_count and updated_at.
+        
+        Args:
+            user_id: User ID
+            date_only: Date (date object)
+            shift: Shift name ('day' or 'night')
+            last_seen: Last seen timestamp
+            serving_time: Boolean - True if currently serving customer
+            no_serving_count: Counter for consecutive non-serving detections
+        """
+        try:
+            tz = pytz.timezone('Asia/Ho_Chi_Minh')
+            now = datetime.now(tz)
+            
+            # Check if row exists BEFORE opening transaction
+            row = self.get_shift_attendance(user_id=user_id, date_only=date_only, shift=shift)
+            
+            # Now open a NEW transaction for insert/update
+            with self as cursor:
+                if row:
+                    # Update existing row
+                    updates = []
+                    params = []
+                    
+                    if last_seen is not None:
+                        updates.append("last_seen=%s")
+                        params.append(last_seen or now)
+                    
+                    if serving_time is not None:
+                        updates.append("serving_time=%s")
+                        params.append(serving_time)
+                    
+                    if no_serving_count is not None:
+                        updates.append("no_serving_count=%s")
+                        params.append(no_serving_count)
+                    
+                    updates.append("updated_at=%s")
+                    params.append(now)
+                    params.append(row.get('id'))
+                    
+                    sql_upd = f"UPDATE shift_attendance SET {', '.join(updates)} WHERE id=%s"
+                    cursor.execute(sql_upd, tuple(params))
+                    return row.get('id')
+                else:
+                    # Insert new row
+                    sql_ins = """INSERT INTO shift_attendance 
+                                 (user_id, date, shift, absence_count, last_seen, serving_time, no_serving_count, updated_at) 
+                                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+                    cursor.execute(sql_ins, (
+                        user_id, 
+                        date_only, 
+                        shift, 
+                        0, 
+                        last_seen or now, 
+                        serving_time if serving_time is not None else False,
+                        no_serving_count if no_serving_count is not None else 0,
+                        now
+                    ))
+                    return cursor.lastrowid
+        except Exception:
+            traceback.print_exc()
+            return None
+
+    def increment_absence_if_inactive(self, threshold_seconds: int = 30, shift: str = None):
+        """Increment absence_count for rows whose last_seen older than threshold_seconds for today's date and optional shift."""
+        try:
+            with self as cursor:
+                tz = pytz.timezone('Asia/Ho_Chi_Minh')
+                now = datetime.now(tz)
+                date_only = now.date()
+                # Select candidates older than threshold
+                sql_sel = "SELECT id, last_seen, absence_count FROM shift_attendance WHERE date=%s" + (" AND shift=%s" if shift else "")
+                params = (date_only, shift) if shift else (date_only,)
+                cursor.execute(sql_sel, params)
+                rows = cursor.fetchall() or []
+                updated = 0
+                for r in rows:
+                    last_seen = r.get('last_seen')
+                    if not last_seen:
+                        # If never seen, treat as inactive
+                        inactive = True
+                    else:
+                        try:
+                            ref_seen = last_seen if last_seen.tzinfo else tz.localize(last_seen)
+                            delta = now - ref_seen
+                        except Exception:
+                            delta = now - now  # fallback 0
+                        inactive = delta.total_seconds() >= threshold_seconds
+                    if inactive:
+                        sql_upd = "UPDATE shift_attendance SET absence_count = absence_count + 1, updated_at=%s WHERE id=%s"
+                        cursor.execute(sql_upd, (now, r.get('id')))
+                        updated += 1
+                return updated
+        except Exception:
+            traceback.print_exc()
+            return 0
+
+    def get_absence_count_for_shift(self, user_id: int, date_only, shift: str):
+        try:
+            with self as cursor:
+                sql = "SELECT absence_count FROM shift_attendance WHERE user_id=%s AND date=%s AND shift=%s LIMIT 1"
+                cursor.execute(sql, (user_id, date_only, shift))
+                row = cursor.fetchone()
+                return (row.get('absence_count') if row else 0) or 0
+        except Exception:
+            traceback.print_exc()
+            return 0
         if date:
             where.append("DATE(c.date) = %s")
             params.append(date)

@@ -156,20 +156,33 @@ export default function ImageUpdate() {
       ctx2.restore();
     }
 
-    // Helper: create a padded gray canvas with the face centered
-    function createPaddedCanvas(srcCanvas: HTMLCanvasElement) {
-      const pad = Math.round(
-        Math.max(8, Math.min(32, Math.min(srcCanvas.width, srcCanvas.height) * 0.08))
-      );
+    // Helper: create padded gray square (rgb(114,114,114)) and resize to 512x512 like Python prepare_face_image()
+    function createPaddedCanvas(srcCanvas: HTMLCanvasElement, targetSize = 512, marginPercent = 0.5) {
+      const w = srcCanvas.width;
+      const h = srcCanvas.height;
+      const marginW = Math.floor(w * marginPercent);
+      const marginH = Math.floor(h * marginPercent);
+      const canvasSize = Math.max(w, h) + Math.max(marginW, marginH) * 2;
+
+      // Step 1: center face on gray padded square
+      const square = document.createElement('canvas');
+      square.width = canvasSize;
+      square.height = canvasSize;
+      const sctx = square.getContext('2d')!;
+      sctx.fillStyle = 'rgb(114,114,114)';
+      sctx.fillRect(0, 0, canvasSize, canvasSize);
+      const startX = Math.floor((canvasSize - w) / 2);
+      const startY = Math.floor((canvasSize - h) / 2);
+      sctx.drawImage(srcCanvas, startX, startY);
+
+      // Step 2: resize to target (512x512)
       const out = document.createElement('canvas');
-      out.width = srcCanvas.width + pad * 2;
-      out.height = srcCanvas.height + pad * 2;
+      out.width = targetSize;
+      out.height = targetSize;
       const octx = out.getContext('2d')!;
-      // Fill gray background similar to Python UI
-      octx.fillStyle = '#BDBDBD';
-      octx.fillRect(0, 0, out.width, out.height);
-      // Draw original face centered with padding margin
-      octx.drawImage(srcCanvas, pad, pad);
+      octx.imageSmoothingEnabled = true;
+      octx.imageSmoothingQuality = 'high';
+      octx.drawImage(square, 0, 0, targetSize, targetSize);
       return out;
     }
 

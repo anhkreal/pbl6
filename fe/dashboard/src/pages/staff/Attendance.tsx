@@ -3,6 +3,8 @@ import StaffLayout from '../../layouts/StaffLayout';
 import { fetchCheckLogs, AttendanceRow } from '../../api/attendance';
 import { apiFetch } from '../../api/http';
 import ErrorBanner from '../../components/ErrorBanner';
+import SkeletonTable from '../../components/SkeletonTable';
+import { downloadCSV } from '../../utils/csv';
 
 export default function StaffAttendance() {
   function todayGmt7() {
@@ -20,6 +22,7 @@ export default function StaffAttendance() {
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState<number | null>(null);
+  const [totalAll, setTotalAll] = useState<number | null>(null);
   const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
@@ -68,6 +71,7 @@ export default function StaffAttendance() {
         if (!ignore) {
           setRows(data.checklogs);
           setTotal(data.total);
+          setTotalAll((data as any).total_all ?? null);
         }
       } catch (e: any) {
         setError(e.message);
@@ -87,15 +91,31 @@ export default function StaffAttendance() {
         </div>
       </div>
       <div className="card">
-        {loading && <div className="card-body">Đang tải...</div>}
+        {loading && <div className="card-body"><SkeletonTable rows={6} cols={6} /></div>}
         {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
         {!loading && !error && (
           <>
           <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>Tổng: <strong>{total ?? 0}</strong></div>
-            <div>
+            <div>Tổng: <strong>{(totalAll ?? total) ?? 0}</strong></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="btn" onClick={() => {
+                const headers = [
+                  { key: 'date', label: 'Ngay' },
+                  { key: 'checkIn', label: 'CheckIn' },
+                  { key: 'checkOut', label: 'CheckOut' },
+                  { key: 'totalHours', label: 'GioLam' },
+                  { key: 'status', label: 'TrangThai' },
+                ];
+                downloadCSV('attendance_staff.csv', rows.map(r => ({
+                  date: r.date,
+                  checkIn: r.checkIn || '',
+                  checkOut: r.checkOut || '',
+                  totalHours: r.totalHours ?? '',
+                  status: r.status
+                })), headers);
+              }}>Xuất CSV</button>
               <button className="btn btn-ghost" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - limit))}>Prev</button>
-              <button className="btn btn-ghost" style={{ marginLeft: 8 }} disabled={offset + limit >= (total ?? 0)} onClick={() => setOffset(offset + limit)}>Next</button>
+              <button className="btn btn-ghost" style={{ marginLeft: 8 }} disabled={(() => { const cap = (totalAll ?? total) ?? 0; return offset + limit >= cap; })()} onClick={() => setOffset(offset + limit)}>Next</button>
             </div>
           </div>
           <table className="table">

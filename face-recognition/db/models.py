@@ -1,7 +1,20 @@
 from dataclasses import dataclass
 from typing import Optional, Any, Dict
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 import base64
+def _iso_utc(dt: Optional[datetime]):
+    """Return ISO-8601 string in UTC for datetime values.
+    - If dt is None: return None
+    - If dt is naive (assumed UTC in our DB), append 'Z'
+    - If dt is aware: convert to UTC and return ISO string with offset
+    """
+    if dt is None:
+        return None
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            return dt.isoformat() + 'Z'
+        return dt.astimezone(timezone.utc).isoformat()
+    return dt
 
 
 def _bytes_to_b64(b: Optional[bytes]) -> Optional[str]:
@@ -82,8 +95,8 @@ class Nguoi:
             'role': self.role,
             'shift': self.shift,
             'status': self.status,
-            'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
-            'updated_at': self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
+            'created_at': _iso_utc(self.created_at),
+            'updated_at': _iso_utc(self.updated_at),
         }
         if include_avatar_base64:
             d['avatar_base64'] = _bytes_to_b64(self.avatar_url)
@@ -112,8 +125,10 @@ class KhuonMat:
         d = {
             'id': self.id,
             'user_id': self.user_id,
-            'added_at': self.added_at.isoformat() if isinstance(self.added_at, datetime) else self.added_at,
-            'updated_at': self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
+            'added_at': _iso_utc(self.added_at),
+            'updated_at': _iso_utc(self.updated_at),
+            # NOTE: image_url is a BLOB storing raw image bytes in DB schema.
+            # It is intentionally exposed as base64 only when include_image_base64=True.
         }
         if include_image_base64:
             d['image_base64'] = _bytes_to_b64(self.image_url)
@@ -151,7 +166,7 @@ class EmotionLog:
             'camera_id': self.camera_id,
             'emotion_type': self.emotion_type,
             'confidence': self.confidence,
-            'captured_at': self.captured_at.isoformat() if isinstance(self.captured_at, datetime) else self.captured_at,
+            'captured_at': _iso_utc(self.captured_at),
             'note': self.note
         }
         if include_image_base64:

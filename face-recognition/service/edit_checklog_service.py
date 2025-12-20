@@ -5,7 +5,7 @@ from dateutil import parser
 
 nguoi_repo = NguoiRepository()
 
-VALID_STATUSES = {'late', 'early', 'on_time'}
+VALID_STATUSES = {'late', 'early', 'on_time', 'absent'}
 
 
 def _parse_to_local_date(s: str):

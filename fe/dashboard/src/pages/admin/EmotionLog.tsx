@@ -5,6 +5,8 @@ import AdminPinModal from '../../components/AdminPinModal';
 import { fetchEmotionLogs, deleteEmotionById, EmotionLog } from '../../api/emotions';
 import { verifyPin } from '../../api/pin';
 import ErrorBanner from '../../components/ErrorBanner';
+import SkeletonTable from '../../components/SkeletonTable';
+import { downloadCSV } from '../../utils/csv';
 
 type AdminEmotionLog = EmotionLog & { note?: string };
 
@@ -19,6 +21,7 @@ export default function EmotionLogPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [total, setTotal] = useState<number | null>(null);
+  const [totalAll, setTotalAll] = useState<number | null>(null);
   const [pinValue, setPinValue] = useState('');
   const [limit, setLimit] = useState(30);
   const [offset, setOffset] = useState(0);
@@ -47,7 +50,7 @@ export default function EmotionLogPage() {
           offset,
           include_image_base64: true
         });
-        if (!ignore) { setLogs(res.logs || []); setTotal(res.total ?? null); }
+        if (!ignore) { setLogs(res.logs || []); setTotal(res.total ?? null); setTotalAll((res as any).total_all ?? null); }
       } catch (e:any) {
         console.error('fetchEmotionLogs error', e);
         setError(e.message || String(e));
@@ -94,13 +97,49 @@ export default function EmotionLogPage() {
           <input type="datetime-local" value={to} onChange={e => setTo(e.target.value)} />
         </div>
       </div>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <button className="btn btn-ghost" onClick={() => setOffset(o => Math.max(0, o - limit))} disabled={offset <= 0} style={{ marginRight: 8 }}>Trước</button>
+            <button className="btn btn-ghost" onClick={() => setOffset(o => o + limit)} disabled={(() => {
+              const cap = (totalAll ?? total);
+              if (cap == null) return false; // unknown
+              return offset + limit >= cap;
+            })()}>Sau</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button className="btn" onClick={() => {
+              const exportRows = (filtered.length ? filtered : logs).map(l => ({
+                id: l.id,
+                userName: l.userName,
+                timestamp: l.timestamp,
+                emotion: l.emotion,
+                note: (l as any).note ?? ''
+              }));
+              const headers = [
+                { key: 'id', label: 'ID' },
+                { key: 'userName', label: 'NhanVien' },
+                { key: 'timestamp', label: 'ThoiDiem' },
+                { key: 'emotion', label: 'CamXuc' },
+                { key: 'note', label: 'GhiChu' },
+              ];
+              downloadCSV('emotion_admin.csv', exportRows, headers);
+            }}>Xuất CSV</button>
+            {(() => {
+              const page = Math.floor(offset / limit) + 1;
+              const cap = (totalAll ?? total);
+              const pages = cap != null ? Math.max(1, Math.ceil(cap / limit)) : undefined;
+              return pages ? `Trang: ${page} / ${pages}` : `Trang: ${page}`;
+            })()}
+          </div>
+        </div>
+      </div>
       <div className="card">
         {loading && <div className="card-body">Đang tải...</div>}
-        {total !== null && <div className="card-body">Tổng bản ghi: {total}</div>}
+        {totalAll !== null && <div className="card-body">Tổng bản ghi: {totalAll}</div>}
         {error && <div className="card-body"><ErrorBanner message={error} onRetry={()=>setRefresh(v=>v+1)} /></div>}
-        <div className="card-body" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-          <div>Trang: {total === 0 ? 0 : (Math.floor(offset / limit) + 1)} / {total !== null ? (total === 0 ? 0 : Math.max(1, Math.ceil(total / limit))) : '?'}</div>
-        </div>
+        <div className="card-body" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}></div>
+        {!loading && (
         <table className="table">
           <thead>
             <tr>
@@ -155,6 +194,8 @@ export default function EmotionLogPage() {
             )}
           </tbody>
         </table>
+        )}
+        {loading && <div className="card-body"><SkeletonTable rows={6} cols={7} /></div>}
       </div>
       <AdminPinModal
         open={pendingDelete !== null}
