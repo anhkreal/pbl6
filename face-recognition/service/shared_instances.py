@@ -41,11 +41,13 @@ class SharedInstances:
             # Load initial data
             self.faiss_manager.load()
             
-            # Thread lock cho FAISS operations
-            self.faiss_lock = threading.Lock()
+            # ⚠️ DEPRECATED: faiss_lock không cần nữa vì FaissIndexManager đã có internal RLock
+            # Giữ lại để backward compatible, nhưng không dùng trong code mới
+            self.faiss_lock = None  # Will be removed in future version
             
             self._initialized = True
             print("✅ Shared instances initialized successfully!")
+            print("⚠️  Note: faiss_lock is deprecated. FaissIndexManager has internal thread-safety.")
     
     def get_extractor(self):
         """Lấy feature extractor (thread-safe)"""
@@ -56,17 +58,27 @@ class SharedInstances:
         return self.faiss_manager
     
     def get_faiss_lock(self):
-        """Lấy lock cho FAISS operations"""
-        return self.faiss_lock
+        """
+        ⚠️ DEPRECATED: Trả về None vì FaissIndexManager đã có internal RLock.
+        Hàm này giữ lại để backward compatible.
+        
+        Migration guide:
+        Thay vì:
+            with faiss_lock:
+                faiss_manager.add_embeddings(...)
+        
+        Chỉ cần:
+            faiss_manager.add_embeddings(...)  # Already thread-safe!
+        """
+        return None
     
     def reload_faiss_if_needed(self):
-        """Reload FAISS chỉ khi cần thiết"""
-        with self.faiss_lock:
-            # Chỉ reload nếu có thay đổi
-            if hasattr(self.faiss_manager, '_needs_reload') and self.faiss_manager._needs_reload:
-                print("🔄 Reloading FAISS index...")
-                self.faiss_manager.load()
-                self.faiss_manager._needs_reload = False
+        """Reload FAISS chỉ khi cần thiết (thread-safe tự động)"""
+        # FaissIndexManager.load() đã có lock bên trong
+        if hasattr(self.faiss_manager, '_needs_reload') and self.faiss_manager._needs_reload:
+            print("🔄 Reloading FAISS index...")
+            self.faiss_manager.load()
+            self.faiss_manager._needs_reload = False
 
 # Global instance
 shared = SharedInstances()

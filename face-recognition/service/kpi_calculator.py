@@ -3,19 +3,23 @@ KPI Calculator Service
 ----------------------
 Tính toán KPI dựa trên emotion logs và attendance (checklog).
 
-KPI Calculation Logic:
+KPI Calculation Logic (UPDATED 2025-12-21):
 1. Emotion Score (0-100):
    - Base: 100
-   - For each bad emotion (Anger, Fear, Sad, Disgust, Surprise):
-     * Penalty based on confidence and frequency
+   - CHỈ trừ điểm khi serving_time=True (đang phục vụ khách)
+   - Sử dụng session tracking: chỉ trừ 1 lần/session (nhóm theo time window 5 phút)
+   - Với mỗi session: trừ emotion XẤU NHẤT
+   - Penalties: Anger(-8), Disgust(-7), Fear(-6), Sad(-5), Surprise(-3)
    
 2. Attendance Score (0-100):
-   - Base: 100
    - Late: -10 points
-   - Early checkout: -5 points
-   - Insufficient hours: additional penalty
+   - Early checkout: -10 points (thay vì -5)
+   - Missing hours + Absences: 
+     min(80 * (total_hours - missing_hours - absence_hours + 1) / total_hours, 80)
+     → Tối đa 80 điểm, cho phép tối đa 1 giờ vắng
+   - Absent: 0 points
    
-3. Total Score: (Emotion Score + Attendance Score) / 2
+3. Total Score: checklog_score * 0.7 + emotion_score * 0.3 (thay vì 50-50)
 """
 
 from datetime import datetime, time, timedelta
@@ -31,8 +35,9 @@ from utils.shift_config import (
 TZ = pytz.timezone('Asia/Ho_Chi_Minh')
 nguoi_repo = NguoiRepository()
 
-# Bad emotions that reduce KPI
+# Bad emotions from emonet output
 BAD_EMOTIONS = ['Anger', 'Fear', 'Sad', 'Disgust', 'Surprise']
+BAD_EMOTIONS_LOWER = {e.lower() for e in BAD_EMOTIONS}
 
 def get_shift_hours(shift: str) -> float:
     """Get expected work hours for a shift."""
@@ -48,14 +53,58 @@ def get_shift_hours(shift: str) -> float:
     return (end - start).total_seconds() / 3600.0
 
 
+def group_emotions_by_session(emotion_logs, window_minutes=5) -> list:
+    """Group emotion logs into sessions based on time proximity.
+    
+    Logic: If two logs are more than 'window_minutes' apart → new session
+    
+    Returns: list of sessions, each session is a list of emotion logs
+    """
+    if not emotion_logs:
+        return []
+    
+    # Sort by timestamp
+    sorted_logs = sorted(emotion_logs, key=lambda x: x.captured_at if hasattr(x, 'captured_at') else x.get('captured_at'))
+    
+    sessions = []
+    current_session = [sorted_logs[0]]
+    
+    for i in range(1, len(sorted_logs)):
+        prev_log = sorted_logs[i - 1]
+        curr_log = sorted_logs[i]
+        
+        prev_time = prev_log.captured_at if hasattr(prev_log, 'captured_at') else prev_log.get('captured_at')
+        curr_time = curr_log.captured_at if hasattr(curr_log, 'captured_at') else curr_log.get('captured_at')
+        
+        # Ensure timezone-aware comparison
+        if prev_time.tzinfo is None:
+            prev_time = TZ.localize(prev_time)
+        if curr_time.tzinfo is None:
+            curr_time = TZ.localize(curr_time)
+        
+        time_gap = (curr_time - prev_time).total_seconds()
+        
+        if time_gap > window_minutes * 60:
+            # Start new session
+            sessions.append(current_session)
+            current_session = [curr_log]
+        else:
+            current_session.append(curr_log)
+    
+    if current_session:
+        sessions.append(current_session)
+    
+    return sessions
+
+
 def calculate_emotion_score(user_id: int, date_local) -> float:
     """Calculate emotion score for a user on a specific date.
     
-    Logic:
+    NEW Logic (2025-12-21 - UPDATED):
     - Start with 100 points
-    - For each bad emotion in emotion_log for that day:
-      * Deduct points based on confidence
-      * More bad emotions = more deductions
+    - CHỈ trừ điểm khi serving_time=True (đang phục vụ khách)
+    - Session được xác định: không phát hiện khách 2 lần liên tiếp → hết session
+    - Với MỖI session: CHỈ trừ emotion TIÊU CỰC ĐẦU TIÊN (đơn giản hóa)
     
     Returns: score between 0 and 100
     """
@@ -73,71 +122,147 @@ def calculate_emotion_score(user_id: int, date_local) -> float:
         if not emotion_logs:
             return 100.0  # No emotion data = perfect score
         
-        score = 100.0
-        bad_emotion_count = 0
+        # Fixed penalty per emotion type
+        PENALTIES = {
+            'anger': 8.0,
+            'angry': 8.0,
+            'disgust': 7.0,
+            'sad': 5.0,
+            'fear': 6.0,
+            'surprise': 3.0,
+        }
         
+        # Filter logs: CHỈ giữ lại những log khi đang phục vụ khách
+        # Logic: serving_time được set bởi mark_seen()
+        # - is_serving=True → serving_time=True
+        # - is_serving=False 2 lần liên tiếp → serving_time=False (hết session)
+        filtered_logs = []
         for log in emotion_logs:
-            emotion_type = log.emotion_type
-            confidence = log.confidence
+            # Get shift_attendance at the time of this emotion log
+            log_time = log.captured_at if hasattr(log, 'captured_at') else log.get('captured_at')
+            if log_time.tzinfo is None:
+                log_time = TZ.localize(log_time)
             
-            if emotion_type in BAD_EMOTIONS:
-                # Deduct points based on confidence
-                # High confidence bad emotion = bigger penalty
-                penalty = confidence * 2.0  # Max 2 points per bad emotion
-                score -= penalty
-                bad_emotion_count += 1
+            # Query shift_attendance for this moment
+            shift = nguoi_repo.get_by_id(user_id).shift
+            attendance = nguoi_repo.get_shift_attendance(
+                user_id=user_id,
+                date_only=log_time.date(),
+                shift=shift
+            )
+            
+            # CHỈ trừ điểm nếu serving_time=True
+            if attendance and attendance.get('serving_time') == True:
+                filtered_logs.append(log)
         
-        # Additional penalty for frequent bad emotions
-        if bad_emotion_count > 10:
-            score -= (bad_emotion_count - 10) * 0.5
+        if not filtered_logs:
+            return 100.0  # No emotions while serving = perfect score
+        
+        # Group filtered logs into sessions
+        # Session tự động phân tách nhờ logic no_serving_count trong mark_seen()
+        sessions = group_emotions_by_session(filtered_logs, window_minutes=5)
+        
+        score = 100.0
+        
+        # NEW LOGIC: Trừ điểm EMOTION TIÊU CỰC ĐẦU TIÊN trong mỗi session
+        for session in sessions:
+            # Tìm emotion tiêu cực ĐẦU TIÊN
+            first_bad_emotion_penalty = 0.0
+            for log in session:
+                emotion = (log.emotion_type or '' if hasattr(log, 'emotion_type') else log.get('emotion_type', '')).strip().lower()
+                penalty = PENALTIES.get(emotion, 0.0)
+                if penalty > 0:  # Tìm thấy emotion tiêu cực đầu tiên
+                    first_bad_emotion_penalty = penalty
+                    break  # Dừng lại, không tìm nữa
+            
+            # Trừ điểm emotion đầu tiên (nếu có)
+            if first_bad_emotion_penalty > 0:
+                score -= first_bad_emotion_penalty
         
         # Ensure score is between 0 and 100
         return max(0.0, min(100.0, score))
         
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] calculate_emotion_score: {e}")
         return 100.0  # Default to perfect score on error
 
 
-def calculate_attendance_score(checklog: dict, shift: str) -> float:
+def calculate_attendance_score(checklog: dict, shift: str, user_id: int, date_local) -> float:
     """Calculate attendance score based on checklog data.
     
-    Logic:
-    - Start with 100 points
+    NEW Logic (2025-12-21):
+    - Absent: 0 points
     - Late: -10 points
-    - Early checkout: -5 points
-    - Worked less than expected: -5 points per missing hour
+    - Early: -10 points  
+    - Missing hours + Absences: 
+      min(80 * (expected_hours - missing_hours - absence_hours + 1) / expected_hours, 80)
+      → Tối đa 80 điểm, cho phép tối đa 1 giờ vắng
     
     Returns: score between 0 and 100
     """
     try:
-        score = 100.0
         status = checklog.get('status', '')
-        
-        # Penalty for late check-in
-        if status == 'late':
-            score -= 10.0
-        
-        # Penalty for early checkout
-        if status == 'early':
-            score -= 5.0
-        
-        # Check worked hours vs expected hours
-        total_hours = checklog.get('total_hours')
-        if total_hours is not None:
-            expected_hours = get_shift_hours(shift)
-            if total_hours < expected_hours:
-                # Deduct 5 points per missing hour
-                missing_hours = expected_hours - total_hours
-                score -= missing_hours * 5.0
         
         # Absent = 0 score
         if status == 'absent':
             return 0.0
         
+        score = 100.0
+        
+        # Penalty for late check-in: -10 điểm
+        if status == 'late':
+            score -= 10.0
+        
+        # Penalty for early checkout: -10 điểm (thay đổi từ -5)
+        if status == 'early':
+            score -= 10.0
+        
+        # Check worked hours vs expected hours
+        total_hours = checklog.get('total_hours')
+        if total_hours is not None:
+            expected_hours = get_shift_hours(shift)  # 6.0 hours
+            
+            # Get absence_count and convert to hours
+            try:
+                absence_count = nguoi_repo.get_absence_count_for_shift(
+                    user_id=user_id,
+                    date_only=date_local,
+                    shift=shift
+                )
+                # Each absence = 10 seconds
+                absence_hours = (absence_count * 10) / 3600.0
+            except Exception:
+                absence_hours = 0.0
+            
+            # Calculate missing hours (expected - actual)
+            missing_hours = max(0.0, expected_hours - total_hours)
+            
+            # NEW FORMULA: min(80 * (expected - missing - absence + 1) / expected, 80)
+            # Tối đa 80 điểm, cho phép tối đa 1 giờ vắng
+            if expected_hours > 0:
+                hours_score = 80.0 * (expected_hours - missing_hours - absence_hours + 1.0) / expected_hours
+                hours_score = min(hours_score, 80.0)  # Cap at 80
+                hours_score = max(hours_score, 0.0)   # Floor at 0
+            else:
+                hours_score = 80.0
+            
+            # Replace the hours component with the new formula
+            # Base score after late/early penalties
+            base_score = score
+            
+            # Final score = base - (100 - base - hours_score)
+            # Simplify: start from hours_score, add late/early penalties
+            score = hours_score
+            if status == 'late':
+                score -= 10.0
+            if status == 'early':
+                score -= 10.0
+        
         # Ensure score is between 0 and 100
         return max(0.0, min(100.0, score))
         
-    except Exception:
+    except Exception as e:
+        print(f"[ERROR] calculate_attendance_score: {e}")
         return 100.0  # Default to perfect score on error
 
 
@@ -169,10 +294,10 @@ def calculate_kpi_for_user_date(user_id: int, date_local) -> dict:
         
         # Calculate individual scores
         emotion_score = calculate_emotion_score(user_id, date_local)
-        attendance_score = calculate_attendance_score(checklog, shift)
+        attendance_score = calculate_attendance_score(checklog, shift, user_id, date_local)
         
-        # Total score is average of both
-        total_score = (emotion_score + attendance_score) / 2.0
+        # NEW FORMULA: Total score = checklog * 0.7 + emotion * 0.3 (thay vì 50-50)
+        total_score = (attendance_score * 0.7) + (emotion_score * 0.3)
         
         # Generate remark
         remarks = []

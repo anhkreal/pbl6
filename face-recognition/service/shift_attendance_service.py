@@ -14,6 +14,7 @@ from service.kpi_service import (
     add_kpi_service,
     update_kpi_service,
 )
+from service.attendance_absence_service import generate_absent_report
 
 TZ = pytz.timezone('Asia/Ho_Chi_Minh')
 ABSENCE_THRESHOLD_SECONDS = 30
@@ -195,90 +196,226 @@ def increment_absences_for_inactive(shift_name: str | None = None):
 
 
 def finalize_shift_absents(shift_name: str, date_local):
-    """At shift end, create absent attendance + KPI=0 for working users without any checklog for the day.
+    """At shift end, handle users without checklog or without checkout.
+    
+    UPDATED 2025-12-21 with GRACE PERIOD:
+    - Được gọi SAU grace period 30 phút (14:30 cho ca sáng, 20:30 cho ca tối)
+    - Grace period cho nhân viên thời gian checkout
 
-    - Insert checklog with status 'absent' if none exists
-    - If KPI exists: set attendance_score=0 and total_score=0
-      else create KPI with both emotion_score and attendance_score = 0 (total=0)
+    1. Users without any checklog:
+       - Insert checklog with status 'absent'
+       - Set KPI to 0/0/0
+    
+    2. Users with check-in but no check-out:
+       - Auto checkout tại thời điểm KẾT THÚC CA (14:00 hoặc 20:00)
+       - KHÔNG trừ điểm early (vì trong grace period)
+       - Recalculate KPI
     """
     try:
+        from service.kpi_calculator import calculate_kpi_for_user_date
+        
         users = nguoi_repo.list_users_by_shift_status(shift=shift_name, status='working')
+        
+        # Determine shift end time (KHÔNG phải 5 phút trước nữa)
+        if shift_name == 'day':
+            shift_end = datetime.combine(date_local, SHIFT_DAY_END).replace(tzinfo=TZ)
+        else:
+            shift_end = datetime.combine(date_local, SHIFT_NIGHT_END).replace(tzinfo=TZ)
+        
+        # Auto checkout time = ĐÚNG GIỜ KẾT THÚC CA (không trừ 5 phút)
+        auto_checkout_time = shift_end
+        
         for u in users:
             uid = u.get('id')
             if uid is None:
                 continue
+            
             existing = nguoi_repo.find_checklog_by_user_and_date(int(uid), date_local)
-            if existing:
-                continue
-            # Add absent attendance row
-            try:
-                nguoi_repo.add_absence(user_id=int(uid), shift=shift_name, edited_by=None, note='auto-absent')
-            except Exception:
-                pass
-            # Ensure KPI exists and is zeroed
-            try:
-                date_str = date_local.strftime('%Y-%m-%d')
-                kpi_res = get_kpi_by_user_and_date_service(int(uid), date_str)
-                if kpi_res.get('success') and kpi_res.get('kpi'):
-                    k = kpi_res['kpi']
-                    update_kpi_service(k['id'], int(uid), date_str, 0.0, 0.0, 0.0, (k.get('remark') or ''))
-                else:
-                    add_kpi_service(int(uid), date_str, 0.0, 0.0, 0.0, 'auto-absent')
-            except Exception:
-                pass
+            
+            if not existing:
+                # Case 1: No checklog at all → Mark absent
+                try:
+                    nguoi_repo.add_absence(user_id=int(uid), shift=shift_name, edited_by=None, note='auto-absent')
+                except Exception:
+                    pass
+                
+                # Ensure KPI exists and is zeroed
+                try:
+                    date_str = date_local.strftime('%Y-%m-%d')
+                    kpi_res = get_kpi_by_user_and_date_service(int(uid), date_str)
+                    if kpi_res.get('success') and kpi_res.get('kpi'):
+                        k = kpi_res['kpi']
+                        update_kpi_service(k['id'], int(uid), date_str, 0.0, 0.0, 0.0, (k.get('remark') or ''))
+                    else:
+                        add_kpi_service(int(uid), date_str, 0.0, 0.0, 0.0, 'auto-absent')
+                except Exception:
+                    pass
+            
+            elif existing.get('check_in') and not existing.get('check_out'):
+                # Case 2: Check-in but no check-out → Auto checkout tại GIỜ KẾT THÚC CA
+                print(f"[finalize] Auto checkout cho user_id={uid} lúc {shift_end.strftime('%H:%M')} (quên checkout trong grace period)")
+                
+                try:
+                    check_in_time = existing.get('check_in')
+                    if check_in_time.tzinfo is None:
+                        check_in_time = TZ.localize(check_in_time)
+                    
+                    # Calculate total hours with absences
+                    total_seconds = (auto_checkout_time - check_in_time).total_seconds()
+                    
+                    try:
+                        absence_count = nguoi_repo.get_absence_count_for_shift(
+                            user_id=int(uid),
+                            date_only=date_local,
+                            shift=shift_name
+                        )
+                    except Exception:
+                        absence_count = 0
+                    
+                    absent_seconds = (absence_count or 0) * 10
+                    if absent_seconds > 0:
+                        total_seconds = max(0.0, total_seconds - absent_seconds)
+                    
+                    total_hours = round(total_seconds / 3600.0, 2)
+                    if total_seconds > 0 and total_hours == 0.0:
+                        total_hours = 0.01
+                    
+                    # NEW: Giữ status hiện tại (on_time/late)
+                    # KHÔNG đặt early vì checkout đúng giờ kết thúc ca
+                    current_status = existing.get('status')
+                    new_status = current_status if current_status in ['late', 'on_time'] else 'on_time'
+                    
+                    nguoi_repo.update_checkin_checkout(
+                        row_id=existing.get('id'),
+                        check_out=auto_checkout_time.replace(tzinfo=None),
+                        total_hours=total_hours,
+                        status=new_status,
+                        edited_by=None,
+                        note='Auto checkout at shift end (within grace period)'
+                    )
+                    
+                    # Recalculate KPI
+                    try:
+                        kpi_data = calculate_kpi_for_user_date(int(uid), date_local)
+                        date_str = date_local.strftime('%Y-%m-%d')
+                        
+                        kpi_res = get_kpi_by_user_and_date_service(int(uid), date_str)
+                        if kpi_res.get('success') and kpi_res.get('kpi'):
+                            kpi = kpi_res['kpi']
+                            update_kpi_service(
+                                kpi_id=kpi['id'],
+                                user_id=int(uid),
+                                date=date_str,
+                                emotion_score=kpi_data['emotion_score'],
+                                attendance_score=kpi_data['attendance_score'],
+                                total_score=kpi_data['total_score'],
+                                remark=kpi_data['remark'] + ' (auto checkout)'
+                            )
+                    except Exception as e:
+                        print(f"[finalize] Warning: Could not update KPI for user_id={uid}: {e}")
+                
+                except Exception as e:
+                    print(f"[finalize] Error auto checkout user_id={uid}: {e}")
+        
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[finalize] Error in finalize_shift_absents: {e}")
         return False
+
+    # Write absent report log for this shift and date
+    try:
+        generate_absent_report(date=date_local.strftime('%Y-%m-%d'), shift=shift_name, write_log=True)
+    except Exception:
+        pass
 
 
 def scheduler_loop():
+    """
+    Scheduler loop with GRACE PERIOD support (2025-12-21 UPDATED):
+    
+    - Khởi tạo ca: đúng giờ bắt đầu (08:00, 14:00)
+    - GRACE PERIOD: 30 phút sau kết thúc ca (14:00-14:30, 20:00-20:30)
+      * KHÔNG track absence (cho nhân viên thời gian checkout)
+      * KHÔNG tính vắng
+    - Finalize ca: sau 30 phút (14:30, 20:30)
+    """
     last_init_day = None
     last_init_night = None
     last_finalize_day = None
     last_finalize_night = None
+    
+    # Grace period: 30 minutes after shift ends
+    GRACE_PERIOD_MINUTES = 30
+    
     while True:
         try:
             now_local = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(TZ)
+            current_time = now_local.time()
+            
+            # Calculate grace period times
+            day_end_grace = (datetime.combine(now_local.date(), SHIFT_DAY_END) + timedelta(minutes=GRACE_PERIOD_MINUTES)).time()
+            night_end_grace = (datetime.combine(now_local.date(), SHIFT_NIGHT_END) + timedelta(minutes=GRACE_PERIOD_MINUTES)).time()
+            
             # At exact shift starts, initialize rows
-            if now_local.time() >= SHIFT_DAY_START and now_local.time() < (datetime.combine(now_local.date(), SHIFT_DAY_START) + timedelta(minutes=1)).time():
+            if current_time >= SHIFT_DAY_START and current_time < (datetime.combine(now_local.date(), SHIFT_DAY_START) + timedelta(minutes=1)).time():
                 if last_init_day != now_local.date():
                     print(f"[scheduler] Khởi tạo ca ngày lúc {now_local.strftime('%H:%M:%S')} cho ngày {now_local.date()}")
                     init_shift_rows('day', now_local.date())
                     last_init_day = now_local.date()
-            if now_local.time() >= SHIFT_NIGHT_START and now_local.time() < (datetime.combine(now_local.date(), SHIFT_NIGHT_START) + timedelta(minutes=1)).time():
+                    
+            if current_time >= SHIFT_NIGHT_START and current_time < (datetime.combine(now_local.date(), SHIFT_NIGHT_START) + timedelta(minutes=1)).time():
                 if last_init_night != now_local.date():
                     print(f"[scheduler] Khởi tạo ca tối lúc {now_local.strftime('%H:%M:%S')} cho ngày {now_local.date()}")
                     init_shift_rows('night', now_local.date())
                     last_init_night = now_local.date()
+                    
             # Catch-up initialization if backend started late but within shift hours and no rows exist yet
-            if SHIFT_DAY_START <= now_local.time() < SHIFT_DAY_END:
+            if SHIFT_DAY_START <= current_time < SHIFT_DAY_END:
                 if last_init_day != now_local.date() and needs_initialization_for_shift('day', now_local.date()):
                     print(f"[scheduler] Catch-up: phát hiện thiếu dữ liệu ca ngày → khởi tạo bổ sung")
                     init_shift_rows('day', now_local.date())
                     last_init_day = now_local.date()
-            if SHIFT_NIGHT_START <= now_local.time() < SHIFT_NIGHT_END:
+                    
+            if SHIFT_NIGHT_START <= current_time < SHIFT_NIGHT_END:
                 if last_init_night != now_local.date() and needs_initialization_for_shift('night', now_local.date()):
                     print(f"[scheduler] Catch-up: phát hiện thiếu dữ liệu ca tối → khởi tạo bổ sung")
                     init_shift_rows('night', now_local.date())
                     last_init_night = now_local.date()
-            # At shift end, auto finalize absentees and zero KPI if needed
-            if now_local.time() >= SHIFT_DAY_END and now_local.time() < (datetime.combine(now_local.date(), SHIFT_DAY_END) + timedelta(minutes=1)).time():
+            
+            # NEW: Finalize shift AFTER grace period (30 minutes after shift end)
+            # Day shift: finalize at 14:30
+            if current_time >= day_end_grace and current_time < (datetime.combine(now_local.date(), day_end_grace) + timedelta(minutes=1)).time():
                 if last_finalize_day != now_local.date():
-                    print(f"[scheduler] Kết thúc ca ngày: tự động đánh vắng và cập nhật KPI")
+                    print(f"[scheduler] Kết thúc ca ngày (sau grace period 30p): tự động đánh vắng và cập nhật KPI lúc {now_local.strftime('%H:%M:%S')}")
                     finalize_shift_absents('day', now_local.date())
                     last_finalize_day = now_local.date()
-            if now_local.time() >= SHIFT_NIGHT_END and now_local.time() < (datetime.combine(now_local.date(), SHIFT_NIGHT_END) + timedelta(minutes=1)).time():
+                    
+            # Night shift: finalize at 20:30
+            if current_time >= night_end_grace and current_time < (datetime.combine(now_local.date(), night_end_grace) + timedelta(minutes=1)).time():
                 if last_finalize_night != now_local.date():
-                    print(f"[scheduler] Kết thúc ca tối: tự động đánh vắng và cập nhật KPI")
+                    print(f"[scheduler] Kết thúc ca tối (sau grace period 30p): tự động đánh vắng và cập nhật KPI lúc {now_local.strftime('%H:%M:%S')}")
                     finalize_shift_absents('night', now_local.date())
                     last_finalize_night = now_local.date()
-            # Every 10s, increment absences for current shift if last_seen > 30s
+            
+            # NEW: Every 10s, increment absences ONLY if NOT in grace period
+            # Grace period: 14:00-14:30 (day), 20:00-20:30 (night)
             sh = current_shift(now_local)
-            if sh in ('day', 'night'):
-                # Increment absence counts in active shift
+            
+            in_grace_period = False
+            if sh == 'day' and SHIFT_DAY_END <= current_time < day_end_grace:
+                in_grace_period = True
+                # print(f"[scheduler] Ca ngày trong grace period (14:00-14:30) → KHÔNG track absence")
+            elif sh == 'night' and SHIFT_NIGHT_END <= current_time < night_end_grace:
+                in_grace_period = True
+                # print(f"[scheduler] Ca tối trong grace period (20:00-20:30) → KHÔNG track absence")
+            
+            if sh in ('day', 'night') and not in_grace_period:
+                # Increment absence counts in active shift (ONLY outside grace period)
                 increment_absences_for_inactive(shift_name=sh)
-        except Exception:
-            pass
+                
+        except Exception as e:
+            print(f"[scheduler] Error: {e}")
+            
         systime.sleep(INCREMENT_INTERVAL_SECONDS)
 
 

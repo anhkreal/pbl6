@@ -3,29 +3,27 @@ from fastapi.responses import JSONResponse
 import numpy as np
 import cv2
 import random
-from service.shared_instances import get_extractor, get_faiss_manager, get_faiss_lock
+from service.shared_instances import get_extractor, get_faiss_manager
 from db.nguoi_repository import NguoiRepository
 from db.models import Nguoi
 from Depend.depend import AddEmbeddingInput
 
 add_router = APIRouter() 
 
-# ✅ Sử dụng shared instances
+# ✅ Sử dụng shared instances (faiss_manager đã thread-safe)
 extractor = get_extractor()
 faiss_manager = get_faiss_manager()
-faiss_lock = get_faiss_lock()
 nguoi_repo = NguoiRepository()
 
 async def add_embedding_service(
     input: AddEmbeddingInput = Depends(AddEmbeddingInput.as_form),
     file: UploadFile = File(...)
 ):
-    # ✅ Kiểm tra kết nối FAISS - không load lại
-    with faiss_lock:
-        try:
-            _ = faiss_manager.image_ids
-        except Exception as e:
-            return {"message": f"Không thể kết nối FAISS: {e}", "status_code": 500}
+    # ✅ Kiểm tra kết nối FAISS - thread-safe tự động
+    try:
+        _ = faiss_manager.image_ids
+    except Exception as e:
+        return {"message": f"Không thể kết nối FAISS: {e}", "status_code": 500}
     
     # Kiểm tra tồn tại image_id
     if str(input.image_id) in [str(id) for id in faiss_manager.image_ids]:
@@ -107,9 +105,9 @@ async def add_embedding_service(
             image_id_to_use = input.image_id or None
 
         # Thread-safe FAISS operations: add embedding with image_id=image_id_to_use and class_id=class_id_to_use
-        with faiss_lock:
-            faiss_manager.add_embeddings([embedding], [image_id_to_use], [None], [class_id_to_use])
-            faiss_manager.save()
+        # No external lock needed - FaissIndexManager has internal RLock
+        faiss_manager.add_embeddings([embedding], [image_id_to_use], [None], [class_id_to_use])
+        faiss_manager.save()
 
         # If user existed, update their avatar_url (latest image) and updated_at
         if nguoi_exist:

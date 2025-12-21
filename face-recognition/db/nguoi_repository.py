@@ -636,3 +636,23 @@ class NguoiRepository(ConnectionHelper):
         except Exception:
             traceback.print_exc()
             return False
+
+    def get_absent_users_by_shift_date(self, shift: str, date_only):
+        """Return list of absent users for a given shift and date.
+
+        Returns list of dict rows: {user_id, full_name, checklog_id}
+        """
+        try:
+            with self as cursor:
+                sql = (
+                    "SELECT c.id AS checklog_id, c.user_id, n.full_name "
+                    "FROM checklog c LEFT JOIN nhanvien n ON c.user_id = n.id "
+                    "WHERE DATE(c.date) = %s AND LOWER(c.status) = 'absent' AND c.shift = %s "
+                    "ORDER BY n.full_name ASC"
+                )
+                cursor.execute(sql, (date_only, shift))
+                rows = cursor.fetchall() or []
+                return rows
+        except Exception:
+            traceback.print_exc()
+            return []

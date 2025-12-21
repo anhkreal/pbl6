@@ -1,7 +1,7 @@
 # 🤖 Face Recognition System - Complete Documentation
 
-**Version:** 2.0.0 - MySQL Authentication System  
-**Last Updated:** December 20, 2025
+**Version:** 2.1.0 - Grace Period & Optimized Logic  
+**Last Updated:** December 21, 2025
 
 ---
 
@@ -18,6 +18,15 @@ This repository contains a comprehensive **AI-powered Face Recognition System** 
 | **[WORKFLOW.md](WORKFLOW.md)** | Step-by-step execution flows with diagrams | Developers debugging issues |
 | **[API_ENDPOINTS.md](#api-endpoints)** | Complete API reference (see below) | API users, integration |
 | **[SETUP.md](#setup)** | Installation & configuration | DevOps, deployment |
+
+### 🆕 v2.1 Documentation (NEW!)
+
+| Document | Purpose | Key Features |
+|----------|---------|--------------|
+| **[FINAL_LOGIC_REPORT_V2.1.md](../FINAL_LOGIC_REPORT_V2.1.md)** | Complete logic documentation v2.1 | Session tracking, Grace period, KPI 70-30 |
+| **[TESTS_COMPLETE.md](TESTS_COMPLETE.md)** | Test suite overview | 37+ test cases, Thread-safety |
+| **[TESTS_V21_README.md](TESTS_V21_README.md)** | Test execution guide | How to run tests |
+| **[TEST_SUITE_SUMMARY.md](TEST_SUITE_SUMMARY.md)** | Detailed test summary | Coverage, Performance |
 
 ---
 
