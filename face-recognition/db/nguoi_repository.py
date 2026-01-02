@@ -409,9 +409,50 @@ class NguoiRepository(ConnectionHelper):
         - status: exact status match
         Returns list of rows (dicts) joined with nhanvien info.
         """
+        from db.models import CheckLog
+        
         sql = "SELECT c.*, n.full_name FROM checklog c LEFT JOIN nhanvien n ON c.user_id = n.id"
         where = []
         params = []
+        
+        if date is not None:
+            where.append("DATE(c.date) = %s")
+            params.append(date)
+        if date_from is not None:
+            where.append("c.date >= %s")
+            params.append(date_from)
+        if date_to is not None:
+            where.append("c.date <= %s")
+            params.append(date_to)
+        if full_name:
+            where.append("n.full_name LIKE %s")
+            params.append(f"%{full_name}%")
+        if user_id is not None:
+            where.append("c.user_id = %s")
+            params.append(user_id)
+        if status:
+            where.append("c.status = %s")
+            params.append(status)
+        
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        
+        sql += " ORDER BY c.date DESC, c.id DESC"
+        sql += " LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        try:
+            with self as cursor:
+                print(f"[query_checklogs] SQL: {sql}")
+                print(f"[query_checklogs] Params: {params}")
+                cursor.execute(sql, params)
+                rows = cursor.fetchall() or []
+                print(f"[query_checklogs] Found {len(rows)} rows")
+                return [CheckLog.from_row(r) for r in rows]
+        except Exception as e:
+            print(f"[query_checklogs] ERROR: {e}")
+            traceback.print_exc()
+            return []
 
     # ===== Shift Attendance Methods =====
     def list_users_by_shift_status(self, shift: str, status: str = 'working'):

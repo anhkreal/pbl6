@@ -18,7 +18,6 @@ def search_embeddings_api(
     page_size: int = Query(15, ge=1, le=15, description='Số kết quả mỗi trang'),
     sort_by: str = Query('image_id_asc', description='Sắp xếp theo')
 ):
-    # ✅ Thread-safe query operation - không load lại
-    with faiss_lock:
-        result = faiss_manager.query_embeddings_by_string(query, page, page_size, sort_by)
+    # ✅ Thread-safe query operation - không load lại (method has internal lock)
+    result = faiss_manager.query_embeddings_by_string(query, page, page_size, sort_by)
     return result

@@ -15,7 +15,7 @@ export default function StaffAnalysis() {
   const [uid, setUid] = useState<number | null>(null);
 
   const [kpi, setKpi] = useState<number>(0);
-  const [negDist, setNegDist] = useState({ angry: 0, sad: 0, fear: 0, disgust: 0 });
+  const [negDist, setNegDist] = useState({ angry: 0, sad: 0, fear: 0, disgust: 0, surprise: 0 });
   const [hoursSeries, setHoursSeries] = useState<{ label: string; value: number }[]>([]);
   const [negSeries, setNegSeries] = useState<{ label: string; value: number }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -37,30 +37,43 @@ export default function StaffAnalysis() {
           if (!ignore && items?.length) setKpi(items[0].totalScore);
           // Emotions
           const logs = await fetchEmotionLogs({ user_id: uid, start_ts: start.toISOString(), end_ts: end.toISOString(), limit: 500, offset: 0 });
-          if (!ignore) setNegDist(toNegDist(logs.logs));
+          console.log('[Analysis] EmotionLogs (day):', logs);
+          const negDist = toNegDist(logs.logs || []);
+          if (!ignore) setNegDist(negDist);
           // Attendance hours (single day)
           const chk = await fetchCheckLogs({ user_id: uid, date_from: day, date_to: day, limit: 100, offset: 0 });
-          const h = dailyHoursFromLogs(chk.checklogs);
+          console.log('[Analysis] CheckLogs (day):', chk);
+          const h = dailyHoursFromLogs(chk.checklogs || []);
           if (!ignore) setHoursSeries([{ label: day.slice(5), value: h[day] ?? 0 }]);
-          if (!ignore) setNegSeries([{ label: day.slice(5), value: sumNegDist(toNegDist(logs.logs)) }]);
+          if (!ignore) setNegSeries([{ label: day.slice(5), value: sumNegDist(negDist) }]);
         } else {
           // month mode
           const monthStr = month;
           const { from, to } = monthBoundsGmt7(monthStr);
+          const allDays = generateDaysInRange(from, to);
+          
           // KPI aggregated for month
           const items = await fetchKPI('month', monthStr, uid, 1, 0);
           if (!ignore && items?.length) setKpi(items[0].totalScore);
+          
           // Emotions over month
           const logs = await fetchEmotionLogs({ user_id: uid, start_ts: from.toISOString(), end_ts: to.toISOString(), limit: 2000, offset: 0 });
-          const perDayNeg = aggregateNegByDay(logs.logs);
-          if (!ignore) setNegSeries(Object.keys(perDayNeg).sort().map(d => ({ label: d.slice(5), value: perDayNeg[d] })));
+          console.log('[Analysis] EmotionLogs (month):', logs);
+          const perDayNeg = aggregateNegByDay(logs.logs || []);
+          // Fill all days with 0 if no data
+          const negSeriesData = allDays.map(d => ({ label: d.slice(5), value: perDayNeg[d] ?? 0 }));
+          if (!ignore) setNegSeries(negSeriesData);
+          
           // Attendance over month
           const chk = await fetchCheckLogs({ user_id: uid, date_from: fmtYmd(from), date_to: fmtYmd(to), limit: 1000, offset: 0 });
-          const perDayH = dailyHoursFromLogs(chk.checklogs);
-          const series = Object.keys(perDayH).sort().map(d => ({ label: d.slice(5), value: perDayH[d] }));
-          if (!ignore) setHoursSeries(series);
+          console.log('[Analysis] CheckLogs (month):', chk);
+          const perDayH = dailyHoursFromLogs(chk.checklogs || []);
+          // Fill all days with 0 if no attendance
+          const hoursSeriesData = allDays.map(d => ({ label: d.slice(5), value: perDayH[d] ?? 0 }));
+          if (!ignore) setHoursSeries(hoursSeriesData);
+          
           // quick dist for legend (from whole month)
-          if (!ignore) setNegDist(toNegDist(logs.logs));
+          if (!ignore) setNegDist(toNegDist(logs.logs || []));
         }
       } catch (e:any) {
         if (!ignore) setError(e.message || 'Lỗi tải dữ liệu');
@@ -173,6 +186,15 @@ function fmtYmd(d: Date) {
   const da = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${da}`;
 }
+function generateDaysInRange(from: Date, to: Date): string[] {
+  const days: string[] = [];
+  const current = new Date(from);
+  while (current <= to) {
+    days.push(fmtYmd(current));
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+  return days;
+}
 async function resolveUserId(): Promise<number | null> {
   const possibleKeys = ['userId', 'user_id', 'id', 'uid'];
   for (const k of possibleKeys) {
@@ -188,24 +210,25 @@ async function resolveUserId(): Promise<number | null> {
   return null;
 }
 function toNegDist(logs: any[]) {
-  const neg = { angry: 0, sad: 0, fear: 0, disgust: 0 } as any;
+  const neg = { angry: 0, sad: 0, fear: 0, disgust: 0, surprise: 0 } as any;
   for (const l of logs) {
     const e = (l.emotion || '').toLowerCase();
     if (e.includes('anger') || e.includes('angry')) neg.angry++;
     else if (e.includes('sad')) neg.sad++;
     else if (e.includes('fear')) neg.fear++;
     else if (e.includes('disgust')) neg.disgust++;
+    else if (e.includes('surprise')) neg.surprise++;
   }
   return neg;
 }
-function sumNegDist(d: { angry: number; sad: number; fear: number; disgust: number }) { return d.angry + d.sad + d.fear + d.disgust; }
+function sumNegDist(d: { angry: number; sad: number; fear: number; disgust: number; surprise: number }) { return d.angry + d.sad + d.fear + d.disgust + d.surprise; }
 function aggregateNegByDay(logs: any[]) {
   const map: Record<string, number> = {};
   for (const l of logs) {
     const ts = l.timestamp || l.captured_at || '';
     const day = ts ? (new Date(ts)).toISOString().slice(0,10) : 'unknown';
     const e = (l.emotion || '').toLowerCase();
-    const isNeg = e.includes('anger') || e.includes('angry') || e.includes('sad') || e.includes('fear') || e.includes('disgust');
+    const isNeg = e.includes('anger') || e.includes('angry') || e.includes('sad') || e.includes('fear') || e.includes('disgust') || e.includes('surprise');
     if (!map[day]) map[day] = 0;
     if (isNeg) map[day]++;
   }
@@ -216,23 +239,47 @@ function dailyHoursFromLogs(rows: any[]) {
   for (const r of rows) {
     const key = r.date;
     if (!map[key]) map[key] = 0;
+    
+    // Ưu tiên total_hours từ database
     const th = Number(r.totalHours ?? r.total_hours ?? 0);
-    if (Number.isFinite(th) && th > 0) map[key] += th;
-    else if (r.check_in && r.check_out) {
+    if (Number.isFinite(th) && th > 0) {
+      map[key] = th; // Ghi đè thay vì cộng dồn để tránh duplicate
+      console.log(`[dailyHoursFromLogs] ${key}: using total_hours = ${th}`);
+    } else if (r.checkIn && r.checkOut) {
       try {
-        const start = new Date(`${r.date}T${r.check_in}:00+07:00`).getTime();
-        const end = new Date(`${r.date}T${r.check_out}:00+07:00`).getTime();
+        // Handle both ISO string and time-only formats
+        const checkIn = r.checkIn.includes('T') ? r.checkIn : `${r.date}T${r.checkIn}`;
+        const checkOut = r.checkOut.includes('T') ? r.checkOut : `${r.date}T${r.checkOut}`;
+        const start = new Date(checkIn).getTime();
+        const end = new Date(checkOut).getTime();
         const hrs = Math.max(0, (end - start) / 3600000);
-        map[key] += hrs;
-      } catch {}
+        map[key] = hrs;
+        console.log(`[dailyHoursFromLogs] ${key}: calculated from checkIn/Out = ${hrs.toFixed(2)}h`);
+      } catch (err) {
+        console.warn(`[dailyHoursFromLogs] ${key}: failed to parse checkIn/Out`, err);
+      }
+    } else if (r.check_in && r.check_out) {
+      try {
+        // Fallback for snake_case fields
+        const checkIn = r.check_in.includes('T') ? r.check_in : `${r.date}T${r.check_in}`;
+        const checkOut = r.check_out.includes('T') ? r.check_out : `${r.date}T${r.check_out}`;
+        const start = new Date(checkIn).getTime();
+        const end = new Date(checkOut).getTime();
+        const hrs = Math.max(0, (end - start) / 3600000);
+        map[key] = hrs;
+        console.log(`[dailyHoursFromLogs] ${key}: calculated from check_in/out = ${hrs.toFixed(2)}h`);
+      } catch (err) {
+        console.warn(`[dailyHoursFromLogs] ${key}: failed to parse check_in/out`, err);
+      }
     }
   }
+  console.log('[dailyHoursFromLogs] result map:', map);
   return map;
 }
 function sumSeries(s: { label: string; value: number }[]) { return s.reduce((a, b) => a + b.value, 0); }
-function negRate(dist: { angry: number; sad: number; fear: number; disgust: number }) {
-  const total = Math.max(1, dist.angry + dist.sad + dist.fear + dist.disgust);
-  return ((dist.angry + dist.sad + dist.fear + dist.disgust) / total) * 100;
+function negRate(dist: { angry: number; sad: number; fear: number; disgust: number; surprise: number }) {
+  const total = Math.max(1, dist.angry + dist.sad + dist.fear + dist.disgust + dist.surprise);
+  return ((dist.angry + dist.sad + dist.fear + dist.disgust + dist.surprise) / total) * 100;
 }
 function buildConclusion({ kpi, negDist, hoursSeries }: { kpi: number; negDist: any; hoursSeries: { label:string; value:number }[] }) {
   const out: string[] = [];

@@ -1,13 +1,24 @@
-interface Dist { angry: number; sad: number; fear: number; disgust: number; }
+interface Dist { angry: number; sad: number; fear: number; disgust: number; surprise: number; }
 const colors: Record<keyof Dist, string> = {
   angry: '#e74c3c',
   sad: '#3498db',
   fear: '#9b59b6',
-  disgust: '#2ecc71'
+  disgust: '#2ecc71',
+  surprise: '#f39c12'
 };
 
 export default function EmotionChart({ dist }: { dist: Dist }) {
   const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1;
+  
+  // Nếu tất cả giá trị bằng 0, hiển thị thông báo
+  if (total === 1 && Object.values(dist).every(v => v === 0)) {
+    return (
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'center', height: 110, background: '#f5f5f5', borderRadius: 4, color: '#999' }}>
+        Không có dữ liệu cảm xúc
+      </div>
+    );
+  }
+  
   let acc = 0;
   const slices = Object.entries(dist).map(([k, v]) => {
     const start = acc / total * 2 * Math.PI;

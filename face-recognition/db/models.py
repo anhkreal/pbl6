@@ -206,6 +206,7 @@ class Camera:
 
 
 @dataclass
+@dataclass
 class CheckLog:
     id: int
     user_id: int

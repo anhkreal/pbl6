@@ -191,7 +191,7 @@ def calculate_attendance_score(checklog: dict, shift: str, user_id: int, date_lo
     """Calculate attendance score based on checklog data.
     
     NEW Logic (2025-12-21):
-    - Absent: 0 points
+    - Absent (or check_in is NULL): 0 points
     - Late: -10 points
     - Early: -10 points  
     - Missing hours + Absences: 
@@ -202,9 +202,15 @@ def calculate_attendance_score(checklog: dict, shift: str, user_id: int, date_lo
     """
     try:
         status = checklog.get('status', '')
+        check_in = checklog.get('check_in')
         
         # Absent = 0 score
         if status == 'absent':
+            return 0.0
+        
+        # NEW: If check_in is NULL, treat as absent (0 score)
+        if check_in is None:
+            print(f"[KPI] user_id={user_id} has NULL check_in → attendance_score = 0")
             return 0.0
         
         score = 100.0
@@ -237,21 +243,22 @@ def calculate_attendance_score(checklog: dict, shift: str, user_id: int, date_lo
             # Calculate missing hours (expected - actual)
             missing_hours = max(0.0, expected_hours - total_hours)
             
-            # NEW FORMULA: min(80 * (expected - missing - absence + 1) / expected, 80)
-            # Tối đa 80 điểm, cho phép tối đa 1 giờ vắng
+            # NEW FORMULA (FIXED 2025-12-21):
+            # hours_score = min(80 * (expected - missing - absence + 1) / expected, 80) + 20
+            # - 80 điểm: Quá trình làm việc (tối đa 80)
+            # - 20 điểm: Base cho on_time (10 đi đúng giờ + 10 về đúng giờ)
+            # - Trừ 10 nếu late, trừ 10 nếu early
             if expected_hours > 0:
-                hours_score = 80.0 * (expected_hours - missing_hours - absence_hours + 1.0) / expected_hours
-                hours_score = min(hours_score, 80.0)  # Cap at 80
-                hours_score = max(hours_score, 0.0)   # Floor at 0
+                hours_component = 80.0 * (expected_hours - missing_hours - absence_hours + 1.0) / expected_hours
+                hours_component = min(hours_component, 80.0)  # Cap at 80
+                hours_component = max(hours_component, 0.0)   # Floor at 0
+                
+                # Add 20 base points (10 for on-time check-in + 10 for on-time check-out)
+                hours_score = hours_component + 20.0
             else:
-                hours_score = 80.0
+                hours_score = 100.0
             
-            # Replace the hours component with the new formula
-            # Base score after late/early penalties
-            base_score = score
-            
-            # Final score = base - (100 - base - hours_score)
-            # Simplify: start from hours_score, add late/early penalties
+            # Start from hours_score, then subtract penalties
             score = hours_score
             if status == 'late':
                 score -= 10.0
@@ -263,7 +270,9 @@ def calculate_attendance_score(checklog: dict, shift: str, user_id: int, date_lo
         
     except Exception as e:
         print(f"[ERROR] calculate_attendance_score: {e}")
-        return 100.0  # Default to perfect score on error
+        import traceback
+        traceback.print_exc()
+        return 0.0  # Return 0 on error (was 100.0 - BUG FIX)
 
 
 def calculate_kpi_for_user_date(user_id: int, date_local) -> dict:
@@ -288,6 +297,17 @@ def calculate_kpi_for_user_date(user_id: int, date_local) -> dict:
                 'attendance_score': 0.0,
                 'total_score': 0.0,
                 'remark': 'No checklog found (absent)'
+            }
+        
+        # NEW: Check if check_in is NULL (pending or not checked in)
+        check_in = checklog.get('check_in')
+        if check_in is None:
+            print(f"[KPI] user_id={user_id} has checklog but check_in is NULL → KPI = 0")
+            return {
+                'emotion_score': 0.0,
+                'attendance_score': 0.0,
+                'total_score': 0.0,
+                'remark': 'No check-in (pending or absent)'
             }
         
         shift = checklog.get('shift', 'day')

@@ -38,10 +38,22 @@ export async function fetchCheckLogs(q: CheckLogQuery = {}): Promise<CheckLogRes
   qp.append('limit', String(q.limit ?? 100));
   qp.append('offset', String(q.offset ?? 0));
 
-  const res: any = await apiFetch<any>(`/checklog?${qp.toString()}`);
+  const url = `/checklog?${qp.toString()}`;
+  console.log('[fetchCheckLogs] Requesting:', url, 'query:', q);
+  
+  const res: any = await apiFetch<any>(url);
+  console.log('[fetchCheckLogs] Raw response:', res);
+  
   const totalRaw = res?.total ?? 0;
   const totalNum = Number(totalRaw) || 0;
   const logs = Array.isArray(res?.checklogs) ? res.checklogs : [];
+  
+  console.log('[fetchCheckLogs] Parsed:', { total: totalNum, checklogsCount: logs.length });
+  
+  if (logs.length > 0) {
+    console.log('[fetchCheckLogs] Sample checklog:', logs[0]);
+  }
+  
   // Map backend fields to AttendanceRow if necessary
   const mapped: AttendanceRow[] = logs.map((r: any) => ({
     id: r.id,
@@ -53,7 +65,10 @@ export async function fetchCheckLogs(q: CheckLogQuery = {}): Promise<CheckLogRes
     shift: r.shift || 'day',
     status: r.status || 'normal'
   }));
+  
   const total_all = res?.total_all != null ? Number(res.total_all) : undefined;
+  console.log('[fetchCheckLogs] Result:', { total: totalNum, checklogs: mapped.length, total_all });
+  
   return { total: totalNum, checklogs: mapped, total_all };
 }
 

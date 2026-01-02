@@ -19,12 +19,11 @@ def delete_class_service(
     # class_id: int = Form(...)
     input: DeleteClassInput = Depends(DeleteClassInput.as_form)
                  ):
-    # ✅ Kiểm tra kết nối FAISS - không load lại
-    with faiss_lock:
-        try:
-            _ = faiss_manager.class_ids
-        except Exception as e:
-            return {"message": f"Không thể kết nối FAISS: {e}", "status_code": 500}
+    # ✅ Kiểm tra kết nối FAISS - không load lại (accessing property is thread-safe)
+    try:
+        _ = faiss_manager.class_ids
+    except Exception as e:
+        return {"message": f"Không thể kết nối FAISS: {e}", "status_code": 500}
     # Kiểm tra kết nối MySQL
     try:
         _ = nguoi_repo
@@ -41,21 +40,21 @@ def delete_class_service(
     # except Exception as e:
     #     print(f'Không reconstruct được embedding image-id={image_id_check} trước khi xóa: {e}')
 
-    # Kiểm tra class_id có tồn tại trong metadata không
-    class_ids_set = set([int(cid) for cid in faiss_manager.class_ids])
-    if int(input.class_id) not in class_ids_set:
-        print(f'class_id={input.class_id} không tồn tại trong không gian embedding.')
-        return {"message": f"class_id={input.class_id} không tồn tại trong không gian embedding.", "status_code": 404}
-    # Lấy các image_id cần xóa
-    idx_to_delete = [int(faiss_manager.image_ids[i]) for i, cid in enumerate(faiss_manager.class_ids) if int(cid) == int(input.class_id)]
-    if not idx_to_delete:
-        print(f'Không tìm thấy vector với class_id={input.class_id}')
+    # Kiểm tra class_id có tồn tại và lấy image_ids - Protected by lock to prevent race condition
+    with faiss_manager._lock:
+        class_ids_set = set([int(cid) for cid in faiss_manager.class_ids])
+        if int(input.class_id) not in class_ids_set:
+            print(f'class_id={input.class_id} không tồn tại trong không gian embedding.')
+            return {"message": f"class_id={input.class_id} không tồn tại trong không gian embedding.", "status_code": 404}
+        # Lấy các image_id cần xóa
+        idx_to_delete = [int(faiss_manager.image_ids[i]) for i, cid in enumerate(faiss_manager.class_ids) if int(cid) == int(input.class_id)]
+        if not idx_to_delete:
+            print(f'Không tìm thấy vector với class_id={input.class_id}')
     
-    # ✅ Thread-safe delete operation
-    with faiss_lock:
-        success = faiss_manager.delete_by_class_id(input.class_id)
-        if success:
-            faiss_manager.save()
+    # ✅ Thread-safe delete operation (delete_by_class_id has internal lock)
+    success = faiss_manager.delete_by_class_id(input.class_id)
+    if success:
+        faiss_manager.save()  # save also has internal lock
     
     if success:
         # Xóa người tương ứng trong bảng nhanvien (giả định class_id == id)

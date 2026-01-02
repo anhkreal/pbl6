@@ -8,6 +8,9 @@ from utils.shift_config import (
     SHIFT_DAY_END,
     SHIFT_NIGHT_START,
     SHIFT_NIGHT_END,
+    GRACE_PERIOD_MINUTES,
+    ABSENCE_THRESHOLD_SECONDS,
+    INCREMENT_INTERVAL_SECONDS
 )
 from service.kpi_service import (
     get_kpi_by_user_and_date_service,
@@ -17,8 +20,6 @@ from service.kpi_service import (
 from service.attendance_absence_service import generate_absent_report
 
 TZ = pytz.timezone('Asia/Ho_Chi_Minh')
-ABSENCE_THRESHOLD_SECONDS = 30
-INCREMENT_INTERVAL_SECONDS = 10
 
 # Emotion penalty weights
 EMOTION_PENALTIES = {
@@ -121,6 +122,85 @@ def needs_initialization_for_shift(shift_name: str, date_local) -> bool:
     except Exception:
         return False
 
+
+def check_and_finalize_missed_shifts():
+    """Check and finalize any shifts that have passed their grace period but were not finalized.
+    
+    This function is called on server startup to handle cases where:
+    - Server was down during shift end time
+    - Server crashed before finalizing shifts
+    
+    Example scenario:
+    - 14:00: Day shift ends
+    - 14:30: Should finalize day shift (after grace period)
+    - 20:00: Server crashes (night shift not finalized)
+    - 22:00: Server restarts → This function detects and finalizes missed shifts
+    
+    Logic:
+    - Check if current time is past any shift's grace period end
+    - For each passed shift TODAY ONLY, check if it was initialized but not finalized
+    - If found, run finalize_shift_absents for that shift
+    """
+    try:
+        now_local = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(TZ)
+        current_time = now_local.time()
+        today = now_local.date()
+        
+        # Calculate grace period end times
+        day_grace_end = (datetime.combine(today, SHIFT_DAY_END) + timedelta(minutes=GRACE_PERIOD_MINUTES)).time()
+        night_grace_end = (datetime.combine(today, SHIFT_NIGHT_END) + timedelta(minutes=GRACE_PERIOD_MINUTES)).time()
+        
+        print(f"[startup-check] Kiểm tra các ca của ngày {today} chưa finalize lúc {now_local.strftime('%H:%M:%S')}")
+        
+        # Check day shift (if past 14:30)
+        if current_time >= day_grace_end:
+            # Check if day shift was initialized but may not be finalized
+            users = nguoi_repo.list_users_by_shift_status(shift='day', status='working')
+            if users:
+                # Check if any user has shift_attendance for today's day shift
+                has_init = False
+                for u in users:
+                    uid = u.get('id')
+                    if uid:
+                        row = nguoi_repo.get_shift_attendance(user_id=int(uid), date_only=today, shift='day')
+                        if row:
+                            has_init = True
+                            break
+                
+                if has_init:
+                    print(f"[startup-check] Phát hiện ca sáng {today} đã khởi tạo nhưng có thể chưa finalize → Tính toán lại")
+                    finalize_shift_absents('day', today)
+                    print(f"[startup-check] ✅ Đã finalize ca sáng {today}")
+        
+        # Check night shift (if past 20:30)
+        if current_time >= night_grace_end:
+            # Check if night shift was initialized but may not be finalized
+            users = nguoi_repo.list_users_by_shift_status(shift='night', status='working')
+            if users:
+                # Check if any user has shift_attendance for today's night shift
+                has_init = False
+                for u in users:
+                    uid = u.get('id')
+                    if uid:
+                        row = nguoi_repo.get_shift_attendance(user_id=int(uid), date_only=today, shift='night')
+                        if row:
+                            has_init = True
+                            break
+                
+                if has_init:
+                    print(f"[startup-check] Phát hiện ca tối {today} đã khởi tạo nhưng có thể chưa finalize → Tính toán lại")
+                    finalize_shift_absents('night', today)
+                    print(f"[startup-check] ✅ Đã finalize ca tối {today}")
+        
+        print(f"[startup-check] Hoàn tất kiểm tra và finalize các ca của ngày {today}")
+        return True
+        
+    except Exception as e:
+        print(f"[startup-check] Lỗi khi kiểm tra missed shifts: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def mark_seen(user_id: int, is_serving: bool = False):
     """Mark user as seen and update serving status.
     
@@ -196,20 +276,23 @@ def increment_absences_for_inactive(shift_name: str | None = None):
 
 
 def finalize_shift_absents(shift_name: str, date_local):
-    """At shift end, handle users without checklog or without checkout.
+    """At shift end, handle users and calculate final KPI.
     
     UPDATED 2025-12-21 with GRACE PERIOD:
     - Được gọi SAU grace period 30 phút (14:30 cho ca sáng, 20:30 cho ca tối)
     - Grace period cho nhân viên thời gian checkout
 
-    1. Users without any checklog:
-       - Insert checklog with status 'absent'
-       - Set KPI to 0/0/0
+    Case 1: Không check-in, không check-out (ABSENT):
+       - Đánh vắng (checklog với status 'absent')
+       - Set KPI = 0/0/0
     
-    2. Users with check-in but no check-out:
+    Case 2: Chỉ check-in, không check-out:
        - Auto checkout tại thời điểm KẾT THÚC CA (14:00 hoặc 20:00)
        - KHÔNG trừ điểm early (vì trong grace period)
-       - Recalculate KPI
+       - TÍNH KPI BÌNH THƯỜNG (attendance + emotion)
+    
+    Case 3: Check-in và check-out đầy đủ:
+       - TÍNH KPI BÌNH THƯỜNG (attendance + emotion)
     """
     try:
         from service.kpi_calculator import calculate_kpi_for_user_date
@@ -232,27 +315,43 @@ def finalize_shift_absents(shift_name: str, date_local):
             
             existing = nguoi_repo.find_checklog_by_user_and_date(int(uid), date_local)
             
-            if not existing:
-                # Case 1: No checklog at all → Mark absent
-                try:
-                    nguoi_repo.add_absence(user_id=int(uid), shift=shift_name, edited_by=None, note='auto-absent')
-                except Exception:
-                    pass
+            # Case 1: Không có checklog HOẶC có checklog nhưng check_in = NULL (pending)
+            if not existing or existing.get('check_in') is None:
+                # KHÔNG check-in → ABSENT (KPI = 0)
+                if not existing:
+                    print(f"[finalize] user_id={uid} KHÔNG có checklog → Bỏ qua (không tạo checklog mới)")
+                    # Do NOT create new checklog - skip this user
+                    continue
+                else:
+                    print(f"[finalize] user_id={uid} có checklog nhưng check_in = NULL (pending) → Cập nhật thành absent, KPI = 0")
+                    
+                    # Update existing checklog to 'absent' status (NOT create new)
+                    try:
+                        with nguoi_repo as cursor:
+                            sql = "UPDATE checklog SET status = 'absent', note = 'No check-in detected' WHERE id = %s"
+                            cursor.execute(sql, (existing['id'],))
+                        print(f"[finalize] Đã cập nhật checklog id={existing['id']} thành status='absent'")
+                    except Exception as e:
+                        print(f"[finalize] Warning: Could not update checklog status: {e}")
                 
-                # Ensure KPI exists and is zeroed
+                # Update KPI to 0/0/0 (do not create new KPI, should already exist from init)
                 try:
                     date_str = date_local.strftime('%Y-%m-%d')
                     kpi_res = get_kpi_by_user_and_date_service(int(uid), date_str)
                     if kpi_res.get('success') and kpi_res.get('kpi'):
                         k = kpi_res['kpi']
-                        update_kpi_service(k['id'], int(uid), date_str, 0.0, 0.0, 0.0, (k.get('remark') or ''))
+                        update_kpi_service(k['id'], int(uid), date_str, 0.0, 0.0, 0.0, 'Absent - No check-in')
+                        print(f"[finalize] Đã cập nhật KPI = 0/0/0 cho user_id={uid} (absent)")
                     else:
-                        add_kpi_service(int(uid), date_str, 0.0, 0.0, 0.0, 'auto-absent')
-                except Exception:
-                    pass
+                        # KPI should exist from init, but if not, create it
+                        add_kpi_service(int(uid), date_str, 0.0, 0.0, 0.0, 'Absent - No check-in')
+                        print(f"[finalize] Đã tạo KPI = 0/0/0 cho user_id={uid} (absent - KPI không tồn tại)")
+                except Exception as e:
+                    print(f"[finalize] Warning: Could not update KPI for absent user_id={uid}: {e}")
             
             elif existing.get('check_in') and not existing.get('check_out'):
-                # Case 2: Check-in but no check-out → Auto checkout tại GIỜ KẾT THÚC CA
+                # Case 2: Chỉ check-in, không check-out → Auto checkout + TÍNH KPI BÌNH THƯỜNG
+                print(f"[finalize] user_id={uid} chỉ check-in → Auto checkout + tính KPI bình thường")
                 print(f"[finalize] Auto checkout cho user_id={uid} lúc {shift_end.strftime('%H:%M')} (quên checkout trong grace period)")
                 
                 try:
@@ -280,10 +379,14 @@ def finalize_shift_absents(shift_name: str, date_local):
                     if total_seconds > 0 and total_hours == 0.0:
                         total_hours = 0.01
                     
-                    # NEW: Giữ status hiện tại (on_time/late)
-                    # KHÔNG đặt early vì checkout đúng giờ kết thúc ca
+                    # NEW: Auto checkout KHÔNG BAO GIỜ là 'early'
+                    # Vì checkout đúng giờ kết thúc ca (trong grace period)
+                    # Chỉ giữ status late (nếu check-in muộn), còn lại là on_time
                     current_status = existing.get('status')
-                    new_status = current_status if current_status in ['late', 'on_time'] else 'on_time'
+                    if current_status == 'late':
+                        new_status = 'late'  # Giữ late nếu check-in muộn
+                    else:
+                        new_status = 'on_time'  # Mặc định on_time (không trừ điểm checkout)
                     
                     nguoi_repo.update_checkin_checkout(
                         row_id=existing.get('id'),
@@ -293,8 +396,9 @@ def finalize_shift_absents(shift_name: str, date_local):
                         edited_by=None,
                         note='Auto checkout at shift end (within grace period)'
                     )
+                    print(f"[finalize] Đã auto checkout: total_hours={total_hours:.2f}h, status={new_status} (không trừ điểm early)")
                     
-                    # Recalculate KPI
+                    # Recalculate KPI (TÍNH BÌNH THƯỜNG)
                     try:
                         kpi_data = calculate_kpi_for_user_date(int(uid), date_local)
                         date_str = date_local.strftime('%Y-%m-%d')
@@ -311,22 +415,52 @@ def finalize_shift_absents(shift_name: str, date_local):
                                 total_score=kpi_data['total_score'],
                                 remark=kpi_data['remark'] + ' (auto checkout)'
                             )
+                            print(f"[finalize] Đã tính KPI (auto checkout): attendance={kpi_data['attendance_score']:.2f}, emotion={kpi_data['emotion_score']:.2f}, total={kpi_data['total_score']:.2f}")
                     except Exception as e:
                         print(f"[finalize] Warning: Could not update KPI for user_id={uid}: {e}")
                 
                 except Exception as e:
                     print(f"[finalize] Error auto checkout user_id={uid}: {e}")
+            
+            else:
+                # Case 3: Check-in và check-out đầy đủ → TÍNH KPI BÌNH THƯỜNG
+                print(f"[finalize] user_id={uid} đã check-in và check-out đầy đủ → Tính KPI bình thường")
+                try:
+                    from service.kpi_calculator import calculate_kpi_for_user_date
+                    kpi_data = calculate_kpi_for_user_date(int(uid), date_local)
+                    date_str = date_local.strftime('%Y-%m-%d')
+                    
+                    kpi_res = get_kpi_by_user_and_date_service(int(uid), date_str)
+                    if kpi_res.get('success') and kpi_res.get('kpi'):
+                        kpi = kpi_res['kpi']
+                        update_kpi_service(
+                            kpi_id=kpi['id'],
+                            user_id=int(uid),
+                            date=date_str,
+                            emotion_score=kpi_data['emotion_score'],
+                            attendance_score=kpi_data['attendance_score'],
+                            total_score=kpi_data['total_score'],
+                            remark=kpi_data['remark'] + ' (finalized)'
+                        )
+                        print(f"[finalize] Đã tính KPI (đầy đủ): attendance={kpi_data['attendance_score']:.2f}, emotion={kpi_data['emotion_score']:.2f}, total={kpi_data['total_score']:.2f}")
+                except Exception as e:
+                    print(f"[finalize] Warning: Could not recalculate KPI for user_id={uid}: {e}")
         
+        # Write absent report log for this shift and date
+        try:
+            generate_absent_report(date=date_local.strftime('%Y-%m-%d'), shift=shift_name, write_log=True)
+            print(f"[finalize] Đã tạo absent report cho ca {shift_name} ngày {date_local.strftime('%Y-%m-%d')}")
+        except Exception as e:
+            print(f"[finalize] Warning: Could not generate absent report: {e}")
+        
+        print(f"[finalize] ✅ Hoàn tất finalize ca {shift_name} ngày {date_local.strftime('%Y-%m-%d')}")
         return True
+        
     except Exception as e:
-        print(f"[finalize] Error in finalize_shift_absents: {e}")
+        print(f"[finalize] ❌ Error in finalize_shift_absents: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
-    # Write absent report log for this shift and date
-    try:
-        generate_absent_report(date=date_local.strftime('%Y-%m-%d'), shift=shift_name, write_log=True)
-    except Exception:
-        pass
 
 
 def scheduler_loop():
@@ -343,9 +477,6 @@ def scheduler_loop():
     last_init_night = None
     last_finalize_day = None
     last_finalize_night = None
-    
-    # Grace period: 30 minutes after shift ends
-    GRACE_PERIOD_MINUTES = 30
     
     while True:
         try:
@@ -420,6 +551,22 @@ def scheduler_loop():
 
 
 def start_scheduler_background():
+    """Start the scheduler background thread and check for missed shifts on startup.
+    
+    This function:
+    1. Checks and finalizes any missed shifts from server downtime
+    2. Starts the scheduler loop in a background thread
+    """
+    print("[scheduler] Khởi động scheduler...")
+    
+    # First, check and finalize any missed shifts
+    try:
+        check_and_finalize_missed_shifts()
+    except Exception as e:
+        print(f"[scheduler] Warning: Lỗi khi kiểm tra missed shifts: {e}")
+    
+    # Then start the scheduler loop
     th = threading.Thread(target=scheduler_loop, daemon=True)
     th.start()
+    print("[scheduler] ✅ Scheduler đã khởi động thành công")
     return th

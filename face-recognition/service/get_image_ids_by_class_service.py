@@ -14,9 +14,8 @@ nguoi_repo = NguoiRepository()
 
 @track_operation("get_image_ids_by_class")
 def get_image_ids_by_class_api_service(class_id: str = Query(..., description="Class ID cần truy vấn")):
-    # ✅ Thread-safe query operation - không load lại
-    with faiss_lock:
-        image_ids = faiss_manager.get_image_ids_by_class(class_id)
+    # ✅ Thread-safe query operation - không load lại (method has internal lock)
+    image_ids = faiss_manager.get_image_ids_by_class(class_id)
     nguoi = None
     try:
         nguoi = nguoi_repo.get_by_id(int(class_id))

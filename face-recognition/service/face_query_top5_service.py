@@ -33,8 +33,8 @@ async def query_face_top5_service(file: UploadFile = File(...)):
     
     emb = extractor.extract(image)
     
-    with faiss_lock:
-        results = faiss_manager.query(emb, topk=5)
+    # query method is already thread-safe with internal lock
+    results = faiss_manager.query(emb, topk=5)
     resp = []
     mysql_error = False
     for r in results:

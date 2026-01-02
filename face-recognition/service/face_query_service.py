@@ -51,9 +51,8 @@ async def query_face_service(file: UploadFile = File(...)):
     
     emb = extractor.extract(image)
     
-    # ✅ Thread-safe FAISS query
-    with faiss_lock:
-        results = faiss_manager.query(emb, topk=1)
+    # ✅ Thread-safe FAISS query (query method has internal lock)
+    results = faiss_manager.query(emb, topk=1)
     
     # Threshold 0.42 chosen based on model validation: scores above 0.42 indicate a confident match.
     if results and results[0]['score'] > 0.57:

@@ -20,12 +20,11 @@ nguoi_repo = NguoiRepository()
 
 @track_operation("reset_index")
 def reset_index_api_service():
-    # ✅ Thread-safe reset operation
-    with faiss_lock:
-        try:
-            _ = faiss_manager.image_ids
-        except Exception as e:
-            return {"message": f"Không thể kết nối FAISS: {e}", "status_code": 500}
+    # ✅ Thread-safe reset operation (accessing property is thread-safe)
+    try:
+        _ = faiss_manager.image_ids
+    except Exception as e:
+        return {"message": f"Không thể kết nối FAISS: {e}", "status_code": 500}
     # Kiểm tra kết nối MySQL
     try:
         nguoi_repo.get_total_and_examples(limit=1)
@@ -37,27 +36,26 @@ def reset_index_api_service():
     faiss_meta_path = getattr(faiss_manager, 'meta_path', None)
 
     try:
-        with faiss_lock:
-            faiss_manager.reset_index()
-
-            # remove files if they exist to fully wipe persisted state
-            if faiss_index_path and os.path.exists(faiss_index_path):
+        # reset_index may have internal lock, but file operations should be outside
+        faiss_manager.reset_index()
+        # remove files if they exist to fully wipe persisted state
+        if faiss_index_path and os.path.exists(faiss_index_path):
+            try:
+                os.remove(faiss_index_path)
+            except Exception:
+                # fallback: try moving to a temp backup
                 try:
-                    os.remove(faiss_index_path)
+                    shutil.move(faiss_index_path, faiss_index_path + '.bak')
                 except Exception:
-                    # fallback: try moving to a temp backup
-                    try:
-                        shutil.move(faiss_index_path, faiss_index_path + '.bak')
-                    except Exception:
-                        pass
-            if faiss_meta_path and os.path.exists(faiss_meta_path):
+                    pass
+        if faiss_meta_path and os.path.exists(faiss_meta_path):
+            try:
+                os.remove(faiss_meta_path)
+            except Exception:
                 try:
-                    os.remove(faiss_meta_path)
+                    shutil.move(faiss_meta_path, faiss_meta_path + '.bak')
                 except Exception:
-                    try:
-                        shutil.move(faiss_meta_path, faiss_meta_path + '.bak')
-                    except Exception:
-                        pass
+                    pass
     except Exception as e:
         return {"message": f"Lỗi khi reset FAISS: {e}", "status_code": 500}
 
@@ -84,10 +82,10 @@ def reset_index_api_service():
 
     # Reinitialize FAISS files to an empty index (if the manager knows paths)
     try:
-        with faiss_lock:
-            faiss_manager.reset_index()
-            # ensure persisted empty files exist
-            faiss_manager.save()
+        # reset_index and save have internal locks
+        faiss_manager.reset_index()
+        # ensure persisted empty files exist
+        faiss_manager.save()
     except Exception as e:
         traceback.print_exc()
         return {"message": f"Lỗi khi lưu FAISS rỗng: {e}", "status_code": 500}

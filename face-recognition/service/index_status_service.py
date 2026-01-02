@@ -14,9 +14,8 @@ nguoi_repo = NguoiRepository()
 
 @track_operation("index_status")
 def index_status_service():
-    # ✅ Thread-safe status check - không load lại
-    with faiss_lock:
-        result = faiss_manager.check_index_data()
+    # ✅ Thread-safe status check - không load lại (method has internal lock)
+    result = faiss_manager.check_index_data()
     # Thêm thông tin bảng nguoi
     # Lấy tổng số người và ví dụ 5 người
     try:

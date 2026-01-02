@@ -51,9 +51,9 @@ def add_face_service(user_id: int, image_bytes: bytes):
         # add embedding to FAISS with rollback semantics
         faiss_added = False
         try:
-            with faiss_lock:
-                faiss_manager.add_embeddings([embedding], [image_id_to_use], [None], [int(user_id)])
-                faiss_manager.save()
+            # add_embeddings and save are already thread-safe with internal locks
+            faiss_manager.add_embeddings([embedding], [image_id_to_use], [None], [int(user_id)])
+            faiss_manager.save()
             faiss_added = True
         except Exception as e:
             # If FAISS add fails, rollback DB insert if we created one

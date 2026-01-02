@@ -80,11 +80,14 @@ class FaissIndexManager:
             self.image_paths = []
             self.class_ids = []
             self.embeddings = []
-            # Làm trống file index và metadata, giữ cấu trúc file
+            
+            # Ensure directories exist before saving
             if self.index_path:
+                os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
                 faiss.write_index(self.index, self.index_path)
                 self._last_index_mtime = os.path.getmtime(self.index_path)
             if self.meta_path:
+                os.makedirs(os.path.dirname(self.meta_path), exist_ok=True)
                 np.savez(self.meta_path,
                          image_ids=np.array([]),
                          image_paths=np.array([]),
@@ -100,8 +103,10 @@ class FaissIndexManager:
         self.image_paths = []
         self.class_ids = []
         self.embeddings = []
-        self.index_path = index_path
-        self.meta_path = meta_path
+        
+        # Convert to absolute paths to avoid working directory issues
+        self.index_path = os.path.abspath(index_path) if index_path else None
+        self.meta_path = os.path.abspath(meta_path) if meta_path else None
         
         # Thread-safety: RLock allows same thread to acquire multiple times
         self._lock = threading.RLock()
@@ -126,61 +131,79 @@ class FaissIndexManager:
     def save(self):
         """Thread-safe: Atomic save to prevent corruption."""
         with self._lock:
+            # Ensure directories exist
+            if self.index_path:
+                os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
+            if self.meta_path:
+                os.makedirs(os.path.dirname(self.meta_path), exist_ok=True)
+            
             try:
-                # Create temporary files for atomic write
-                temp_index = None
-                temp_meta = None
-                
+                # Save index
                 if self.index_path:
-                    # Write to temp file first
-                    temp_index = self.index_path + '.tmp'
-                    faiss.write_index(self.index, temp_index)
+                    logger.info(f"Saving index to {self.index_path}")
+                    # Create temp file in same directory for atomic operation
+                    fd_idx, temp_index = tempfile.mkstemp(suffix='.tmp', dir=os.path.dirname(self.index_path))
+                    os.close(fd_idx)  # Close file descriptor, faiss will write
                     
-                    # Backup old file if exists
-                    if os.path.exists(self.index_path):
-                        backup_path = self.index_path + '.backup'
-                        shutil.copy2(self.index_path, backup_path)
-                    
-                    # Atomic rename
-                    shutil.move(temp_index, self.index_path)
-                    
-                    # Update mtime tracking
-                    self._last_index_mtime = os.path.getmtime(self.index_path)
+                    try:
+                        faiss.write_index(self.index, temp_index)
+                        
+                        # Backup old file if exists
+                        if os.path.exists(self.index_path):
+                            backup_path = self.index_path + '.backup'
+                            shutil.copy2(self.index_path, backup_path)
+                        
+                        # Atomic rename
+                        os.replace(temp_index, self.index_path)
+                        self._last_index_mtime = os.path.getmtime(self.index_path)
+                        logger.info(f"Successfully saved index file")
+                    except Exception as idx_err:
+                        # Cleanup temp file on error
+                        if os.path.exists(temp_index):
+                            os.remove(temp_index)
+                        raise idx_err
                 
+                # Save metadata
                 if self.meta_path:
-                    # Write to temp file first
-                    temp_meta = self.meta_path + '.tmp'
-                    np.savez(temp_meta,
-                             image_ids=np.array(self.image_ids),
-                             image_paths=np.array(self.image_paths),
-                             class_ids=np.array(self.class_ids),
-                             embeddings=np.array(self.embeddings, dtype=np.float32))
+                    logger.info(f"Saving metadata to {self.meta_path}")
+                    logger.info(f"Data: {len(self.image_ids)} image_ids, {len(self.embeddings)} embeddings")
                     
-                    # Backup old file if exists
-                    if os.path.exists(self.meta_path):
-                        backup_path = self.meta_path + '.backup'
-                        shutil.copy2(self.meta_path, backup_path)
+                    # Create temp file in same directory for atomic operation
+                    fd_meta, temp_meta = tempfile.mkstemp(suffix='.npz', dir=os.path.dirname(self.meta_path))
+                    os.close(fd_meta)  # Close file descriptor, numpy will write
                     
-                    # Atomic rename
-                    shutil.move(temp_meta, self.meta_path)
-                    
-                    # Update mtime tracking
-                    self._last_meta_mtime = os.path.getmtime(self.meta_path)
+                    try:
+                        np.savez(temp_meta,
+                                 image_ids=np.array(self.image_ids),
+                                 image_paths=np.array(self.image_paths),
+                                 class_ids=np.array(self.class_ids),
+                                 embeddings=np.array(self.embeddings, dtype=np.float32))
+                        
+                        # Verify file was created
+                        if not os.path.exists(temp_meta):
+                            raise FileNotFoundError(f"np.savez failed to create temp file: {temp_meta}")
+                        
+                        logger.info(f"Temp metadata file created: {temp_meta} ({os.path.getsize(temp_meta)} bytes)")
+                        
+                        # Backup old file if exists
+                        if os.path.exists(self.meta_path):
+                            backup_path = self.meta_path + '.backup'
+                            shutil.copy2(self.meta_path, backup_path)
+                        
+                        # Atomic rename
+                        os.replace(temp_meta, self.meta_path)
+                        self._last_meta_mtime = os.path.getmtime(self.meta_path)
+                        logger.info(f"Successfully saved metadata file")
+                    except Exception as meta_err:
+                        # Cleanup temp file on error
+                        if os.path.exists(temp_meta):
+                            os.remove(temp_meta)
+                        logger.error(f"Failed to save metadata: {meta_err}")
+                        raise meta_err
                 
                 logger.info(f"Successfully saved index with {len(self.image_ids)} embeddings")
                 
             except Exception as e:
-                # Cleanup temp files on error
-                if temp_index and os.path.exists(temp_index):
-                    try:
-                        os.remove(temp_index)
-                    except Exception:
-                        pass
-                if temp_meta and os.path.exists(temp_meta):
-                    try:
-                        os.remove(temp_meta)
-                    except Exception:
-                        pass
                 logger.error(f"Failed to save index: {e}")
                 raise
 
@@ -191,11 +214,21 @@ class FaissIndexManager:
         - Nếu file không thay đổi kể từ lần load trước, bỏ qua việc load lại để tối ưu hiệu năng.
         - Nếu file thay đổi, đọc lại index và metadata, đồng bộ các thuộc tính image_ids, image_paths, class_ids, embeddings.
         - Nếu embeddings trong metadata bị thiếu hoặc không khớp số lượng với image_ids, sẽ reconstruct lại embeddings từ FAISS index.
+        - Nếu files không tồn tại, giữ nguyên state hiện tại (empty index).
         """
         with self._lock:
+            # Check if files exist
+            if not (self.index_path and os.path.exists(self.index_path)):
+                logger.warning(f"Index file not found: {self.index_path}. Keeping empty index.")
+                return
+            
+            if not (self.meta_path and os.path.exists(self.meta_path)):
+                logger.warning(f"Metadata file not found: {self.meta_path}. Keeping empty index.")
+                return
+            
             # 1. Lấy thời gian sửa đổi cuối cùng (mtime) của file index và metadata
-            index_mtime = os.path.getmtime(self.index_path) if self.index_path and os.path.exists(self.index_path) else None
-            meta_mtime = os.path.getmtime(self.meta_path) if self.meta_path and os.path.exists(self.meta_path) else None
+            index_mtime = os.path.getmtime(self.index_path)
+            meta_mtime = os.path.getmtime(self.meta_path)
 
             # 2. Nếu đã từng load và mtime không đổi, bỏ qua việc load lại
             if self._last_index_mtime == index_mtime and self._last_meta_mtime == meta_mtime:

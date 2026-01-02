@@ -274,13 +274,24 @@ async def query_and_checkin(
                 # Kiểm tra đã có checklog chưa
                 checklog = nguoi_repo.find_checklog_by_user_and_date(int(class_id), today)
                 if checklog:
-                    checkin_res = {"success": False, "message": "Đã tồn tại checklog cho user này trong ngày hiện tại."}
+                    # Nếu đã có checklog, kiểm tra check_in
+                    check_in_time = checklog.get('check_in')
+                    if check_in_time is None:
+                        # check_in = NULL, cho phép update (check-in muộn)
+                        print(f"[info] Checklog tồn tại với check_in=NULL, cho phép update check-in")
+                        checkin_res = svc_checkin(user_id=int(class_id), edited_by=None, note=None)
+                    else:
+                        # Đã check-in rồi
+                        checkin_res = {"success": False, "message": "Đã check-in trước đó trong ngày hiện tại."}
                 else:
+                    # Chưa có checklog, tạo mới
                     checkin_res = svc_checkin(user_id=int(class_id), edited_by=None, note=None)
-                    # Kiểm tra đã có KPI cho user_id trong ngày hiện tại chưa
+                
+                # Kiểm tra và tạo KPI nếu chưa có (cho cả trường hợp tạo mới và update)
+                if checkin_res.get('success'):
                     kpi_res = get_kpi_by_user_and_date_service(int(class_id), str(today))
                     if not (kpi_res.get('success') and kpi_res.get('kpi')):
-                        # Chưa có KPI, mới tạo mới
+                        # Chưa có KPI, tạo mới
                         from api.kpi import add_kpi
                         kpi_kwargs = {
                             "user_id": int(class_id),
@@ -291,9 +302,9 @@ async def query_and_checkin(
                             "remark": str(100 * 0.3 + 100 * 0.7)
                         }
                         kpi_result = await add_kpi(**kpi_kwargs)
-                        print(f"[debug] Gọi add_kpi trực tiếp với: {kpi_kwargs}, response: {kpi_result.body.decode()}")
+                        print(f"[debug] Tạo KPI mới: {kpi_kwargs}, response: {kpi_result.body.decode()}")
                     else:
-                        print(f"[debug] KPI đã tồn tại cho user_id {class_id} trong ngày {today}, không tạo mới.")
+                        print(f"[debug] KPI đã tồn tại cho user_id {class_id} trong ngày {today}")
             except Exception as e:
                 checkin_res = {"success": False, "message": f"Lỗi khi checkin: {e}"}
         else:
